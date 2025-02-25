@@ -1,0 +1,57 @@
+plugins {
+    id("groovy")
+    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("io.micronaut.application") version "4.4.0"
+
+}
+
+version = "0.1"
+group = "mauro.plugin.duckdb"
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation("info.picocli:picocli")
+    implementation("io.micronaut.groovy:micronaut-runtime-groovy")
+    implementation("io.micronaut.picocli:micronaut-picocli")
+    implementation("io.micronaut.serde:micronaut-serde-jackson")
+    compileOnly("info.picocli:picocli-codegen")
+    compileOnly("io.micronaut.serde:micronaut-serde-processor")
+    runtimeOnly("ch.qos.logback:logback-classic")
+    implementation("io.micronaut:micronaut-jackson-databind")
+    implementation group: 'org.apache.groovy', name: 'groovy-json', version: '4.0.21'
+    runtimeOnly("org.yaml:snakeyaml")
+
+    implementation("io.micronaut.sql:micronaut-jdbc-hikari")
+//    runtimeOnly("com.zaxxer:HikariCP:5.1.0")
+
+    implementation (group: 'com.databricks', name: 'databricks-jdbc', version: '2.6.38')
+    implementation (group: 'org.duckdb', name: 'duckdb_jdbc', version: '1.2.0')
+    implementation 'uk.ac.ox.softeng.mauro:mauro-domain:0.0.1-SNAPSHOT'
+
+    implementation group: 'org.apache.commons', name: 'commons-csv', version: '1.12.0'
+}
+
+
+application {
+    mainClass = "mauro.plugin.databricks.MauroPluginDatabricksCommand"
+}
+java {
+    sourceCompatibility = JavaVersion.toVersion("17")
+    targetCompatibility = JavaVersion.toVersion("17")
+}
+
+
+micronaut {
+    testRuntime("spock2")
+    processing {
+        incremental(true)
+        annotations("mauro.plugin.databricks.*")
+    }
+}
+
+
+
