@@ -2,10 +2,6 @@ package mauro.plugin.duckdb
 
 import uk.ac.ox.softeng.mauro.domain.datamodel.DataElement
 import uk.ac.ox.softeng.mauro.domain.facet.Metadata
-import uk.ac.ox.softeng.mauro.domain.model.AdministeredItem
-
-import java.sql.Connection
-import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
 import java.time.LocalDate
@@ -14,9 +10,8 @@ import java.time.format.DateTimeParseException
 
 class Util
 {
-    final static long MAX_ENUMERATION_VALUES = 50
+    final static long MAX_ENUMERATION_VALUES = 80
     final static long MAX_ENUMERATION_VALUE_LENGTH = 100
-    final static long SUMMARY_METADATA_FLOOR = 0
 
     // date parsing
     final static DateTimeFormatter iso_local=DateTimeFormatter.ISO_LOCAL_DATE;
@@ -46,9 +41,15 @@ class Util
     static long makeBinInterval(final long distinctValuesCount,final long lowest_value, final long highest_value)
     {
         long numberOfBins = (long) Math.max(3,Math.min(8,Math.ceil(Math.log10(distinctValuesCount))));
-        long binInterval=makeLowestIntervalValueForBin((highest_value-lowest_value).intdiv(numberOfBins));
+        long binInterval=makeBinIntervalValue((highest_value-lowest_value).intdiv(numberOfBins));
         if(binInterval<=0){binInterval=1;}
         return binInterval;
+    }
+
+    static long makeBinIntervalValue(final long range)
+    {
+        final double digits=Math.floor(Math.log10((double) range))
+        return (long) Math.pow(10,digits);
     }
 
     static long makeLowestIntervalValueForBin(final long min_value)
@@ -194,43 +195,45 @@ class Util
 
     /* */
 
-    static isString(DataElement dataElement) {
-        dataElement.dataType.label in ['STRING']
-    }
-
     /*
-    https://docs.databricks.com/en/sql/language-manual/sql-ref-datatypes.html
+    https://duckdb.org/docs/sql/data_types/overview.html
     */
 
-    static isNumeric(DataElement dataElement) {
-        dataElement.dataType.label in ['BIGINT', 'DECIMAL', 'DOUBLE', 'FLOAT', 'INT', 'SMALLINT', 'TINYINT', 'LONG']
+    static final String[] TYPES_INT=['TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT','UHUGEINT']
+    static final String[] TYPES_STRING=['VARCHAR','CHAR','BPCHAR','STRING','TEXT']
+    static final String[] TYPES_DATE=['DATE']
+    static final String[] TYPES_DATETIME=['TIMESTAMP_NS','TIMESTAMP','TIMESTAMP_MS','TIMESTAMP_S','TIMESTAMPZ','TIME','TIMEZ']
+    static final String[] TYPES_DECIMAL=['FLOAT','FLOAT4','REAL','DOUBLE','FLOAT8','DECIMAL','NUMERIC']
+
+    static boolean isINT(final String SQLType) { return SQLType.toUpperCase() in TYPES_INT }
+    static boolean isSTRING(final String SQLType) { return SQLType.toUpperCase() in TYPES_STRING }
+    static boolean isDATE(final String SQLType) { return SQLType.toUpperCase() in TYPES_DATE }
+    static boolean isDATETIME(final String SQLType) { return SQLType.toUpperCase() in TYPES_DATETIME }
+    static boolean isDECIMAL(final String SQLType) { return SQLType.toUpperCase() in TYPES_DECIMAL }
+
+    static String getMauroDataType(final String SQLType)
+    {
+        if(isINT(SQLType)){return 'integer'}
+        if(isSTRING(SQLType)) {return 'string'}
+        if(isDATE(SQLType)) {return 'date'}
+        if(isDATETIME(SQLType)) {return 'datetime'}
+        if(isDECIMAL(SQLType)) {return 'decimal'}
+
+        return 'string'
     }
 
-    static isInteger(DataElement dataElement) {
-        dataElement.dataType.label in ['BIGINT', 'INT', 'SMALLINT', 'TINYINT', 'LONG']
+    static boolean isString(DataElement dataElement) { return isSTRING(dataElement.dataType.label) }
+
+    static boolean isNumeric(DataElement dataElement)
+    {
+        return isINT(dataElement.dataType.label) || isDECIMAL(dataElement.dataType.label)
     }
 
-    static isDate(DataElement dataElement) {
-        dataElement.dataType.label in ['DATE', 'TIMESTAMP','TIMESTAMP_NTZ']
-    }
+    static boolean isInteger(DataElement dataElement) { return isINT(dataElement.dataType.label) }
 
-    static String escapeIdentifier(String identifier) {
-        identifier = identifier.toLowerCase()
-        if (!(identifier ==~ /[\w-\/\[\]:&]+/)) {
-            throw new IllegalArgumentException("Identifier [$identifier] contains invalid character(s)")
-        }
-        if (identifier.contains('-') || identifier.contains('/') || identifier.contains(':') || identifier.contains('&')) identifier = "`$identifier`"
-        identifier
-    }
-
-    static String normaliseEnumerationValueSql(String identifier) {
-        //"coalesce(nullif(coalesce(regexp_replace(regexp_replace(trim(substr($identifier, 1, $MAX_ENUMERATION_VALUE_LENGTH)), '\\\\p{Space}+', ' '),'[\\\\P{Print}@|\$]', '�'), '<null>'), ''), '<blank>')" // regexp_replace is slow on big tables
-        // replace Mauro disallowed label characters with '�', convert nulls to '<null>', blanks to '<blank>'
-        "replace(nvl(nullif(nvl(translate(trim(substr($identifier, 1, $MAX_ENUMERATION_VALUE_LENGTH)), '@|\$\\0', '���'), '<null>'), ''), '<blank>'), '\\\\', '\\\\\\\\')" // todo check
-    }
-
-    static String lookupCodeDescriptionSql(final String display, final String value, final String table, final  String identifier){
-        return '(select first('+display+') from '+table+' where '+value+' = '+identifier+')';
+    static boolean isDate(DataElement dataElement)
+    {
+        return isDATE(dataElement.dataType.label) || isDATETIME(dataElement.dataType.label)
     }
 
     static List<Map<String,Object>> resultSetToList(ResultSet resultSet) {
@@ -246,13 +249,6 @@ class Util
 
     static String normaliseLabelCase(String label) {
         label.replaceAll(/(_|^)([a-zA-Z0-9]*)/, {it[1] + it[2].toLowerCase().capitalize()})
-    }
-
-    static AdministeredItem addResultsAsMetadata(AdministeredItem item, Map<String, Object> results) {
-        results.findAll {it.key && it.value}.each {
-            item.metadata.add(new Metadata(namespace: this.class.packageName, key: it.key, value: it.value))
-        }
-        item
     }
 
     /* Check for existence of metadata */

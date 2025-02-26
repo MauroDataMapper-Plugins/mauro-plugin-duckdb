@@ -311,82 +311,92 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             final DataClass dataClass = new DataClass(label: tableName)
             addClass(parent,dataClass)
 
-            final String DDL="CREATE TABLE \""+tableName+"\" AS SELECT * FROM read_csv('"+child.toString()+"', header=true)";
-            PreparedStatement readCSVStatement=null;
+            // Using a large sample size to get autodetect to fail
+            // If it doesn't succeed, try being more specific by setting the quotes and escape quotes
 
-            boolean worked=false;
+            final String[] sniffs=new String[]
+            {
+                    "('"+child.toString()+"', header=true, normalize_names=true,  sample_size=2048000)",
+                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000)"
+            };
 
-            try {
-                readCSVStatement = connection.prepareStatement(DDL);
-                log.info(DDL)
+            boolean anyWorked=false;
 
-                // There is a bug where this returns false even though it succeeds
-                readCSVStatement.execute();
+            for(String sniff : sniffs)
+            {
+                // quote='"', escape='"',
+                final String DDL = "CREATE TABLE \"" + tableName + "\" AS SELECT * FROM read_csv"+sniff;
+                PreparedStatement readCSVStatement = null;
 
-                {
-                    try {
-                        readCSVStatement.close();
-                    }
-                    catch (SQLException sqle2) {
-                        log.warn(sqle2.toString())
-                    }
-                }
+                boolean worked = false;
 
-
-                ResultSet rows = null;
                 try {
-                    // See if it actually worked or not by issuing a SELECT over the table
+                    log.trace(DDL)
+                    readCSVStatement = connection.prepareStatement(DDL);
 
-                    final String didItWork = "SELECT * FROM \"" + tableName + "\" LIMIT 1";
+                    // There is a bug where this returns false even though it succeeds
+                    readCSVStatement.execute();
 
-                    rows = connection.prepareStatement(didItWork).executeQuery();
-                    rows.next();
-                    worked = true;
-                    rows.close();
-                }
-                catch (SQLException sqle) {
-                    // Nothing to do
-                    log.error(sqle.toString())
-                }
-                finally {
-                    if (rows != null) {
+                    {
                         try {
-                            rows.close();
-                            rows = null;
+                            readCSVStatement.close();
                         }
                         catch (SQLException sqle2) {
+                            log.warn(sqle2.toString())
                         }
                     }
 
-                }
-            }
-            catch(SQLException sqlPrepare)
-            {
-                log.warn(sqlPrepare.toString())
-            }
-            finally
-            {
-                if (readCSVStatement != null)
-                {
-                    try
-                    {
-                        readCSVStatement.close();
-                    }
-                    catch (SQLException sqle2)
-                    {
-                        log.warn(sqle2.toString())
-                    }
-                }
-            }
 
-            if(worked)
-            {
-                log.info("Created table "+tableName+" from "+child.toString())
+                    ResultSet rows = null;
+                    try {
+                        // See if it actually worked or not by issuing a SELECT over the table
+
+                        final String didItWork = "SELECT * FROM \"" + tableName + "\" LIMIT 1";
+
+                        rows = connection.prepareStatement(didItWork).executeQuery();
+                        rows.next();
+                        worked = true;
+                        rows.close();
+                    }
+                    catch (SQLException sqle) {
+                        // Nothing to do
+                        log.error(sqle.toString())
+                    }
+                    finally {
+                        if (rows != null) {
+                            try {
+                                rows.close();
+                                rows = null;
+                            }
+                            catch (SQLException sqle2) {
+                            }
+                        }
+
+                    }
+                }
+                catch (SQLException sqlPrepare) {
+                    log.warn(sqlPrepare.toString())
+                }
+                finally {
+                    if (readCSVStatement != null) {
+                        try {
+                            readCSVStatement.close();
+                        }
+                        catch (SQLException sqle2) {
+                            log.warn(sqle2.toString())
+                        }
+                    }
+                }
+
+                if (worked) {
+                    log.info("Created table " + tableName + " from " + child.toString())
+                    anyWorked=true;
+                    break;
+                }
             }
-            else
+            if(!anyWorked)
             {
-                log.error("Failed to create table "+tableName+" from "+child.toString())
-                return
+                throw new Exception("Failed to create table " + tableName + " from " + child.toString())
             }
 
             // Import columns as DataElements
@@ -417,18 +427,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 String labelString=(String) label
 
                 DataType dataType = new DataType(dataTypeKind: DataType.DataTypeKind.PRIMITIVE_TYPE, label: labelString)
-                // todo move types to separate script
-                if (labelString in ['LONG', 'INT']) {
-                    dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: 'integer'))
-                } else if (labelString in ['DATE']) {
-                    dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: 'date'))
-                } else if (labelString in ['TIMESTAMP']) {
-                    dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: 'datetime'))
-                } else if (labelString in ['STRING']) {
-                    dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: 'string'))
-                } else if (labelString in ['DOUBLE']) {
-                    dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: 'decimal'))
-                }
+                dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: Util.getMauroDataType(labelString)))
+
+                log.info(labelString+" -> "+Util.getMauroDataType(labelString));
+
                 if((dataModel.dataTypes.findAll {it.label==dataType.label}).isEmpty())
                 {
                     dataModel.dataTypes << dataType
@@ -546,11 +548,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         final lc_fileName=fileName.toLowerCase()
         for(String suffix : suffixes)
         {
-            final int d_suffix=lc_fileName.lastIndexOf(suffix);
-            if(d_suffix!=-1)
-            {
-                return true
-            }
+            if(lc_fileName.endsWith(suffix)){return true;}
         }
 
         return false
@@ -570,10 +568,9 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             for(String suffix : suffixes)
             {
-                final int d_suffix=lc_fileName.lastIndexOf(suffix);
-                if(d_suffix!=-1)
+                if(lc_fileName.endsWith(suffix))
                 {
-                    fileName=fileName.take(d_suffix)
+                    fileName=fileName.take(fileName.length()-suffix.length())
                     continue pruning
                 }
             }
@@ -628,7 +625,12 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
         }
         dataClass.dataElements.findAll {Util.isString(it) }.each {DataElement dataElement ->
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'max_string_length', value: counts[(dataElement.label.toLowerCase() + '_max_len') ]))
+            Object max_len=counts[(dataElement.label.toLowerCase() + '_max_len') ];
+            if(max_len==null)
+            {
+                max_len=0L;
+            }
+            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'max_string_length', value: max_len))
         }
     }
 
@@ -645,14 +647,15 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         List<DataElement> enumerationColumns = []
 
-        dataClass.dataElements.each { DataElement column ->
-
+        for(DataElement column : dataClass.dataElements)
+        {
             boolean isEnumerationColumn = true
 
-            long distinctValues = column.metadata.find {it.key == 'distinct_values_count'}.value.toLong()
+            final long distinctValues = column.metadata.find {it.key == 'distinct_values_count'}.value.toLong()
 
             if (distinctValues > Util.MAX_ENUMERATION_VALUES) {
                isEnumerationColumn = false
+                log.info(column.label+" has more than "+Util.MAX_ENUMERATION_VALUES+" distinct values: "+distinctValues);
             }
 
             // The number of distinct values must be different to the number of values in total
@@ -663,21 +666,35 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             if((distinctValues / totalValues) > 0.99)
             {
                 isEnumerationColumn = false
+                log.info(column.label+" has more than 0.99 distinctValues / totalValues ");
             }
 
             // Strings have a maximum length
             if(Util.isString(column))
             {
-                long maxStringLength = column.metadata.find {it.key == 'max_string_length'}.value.toLong()
+                final Object maxStringLengthObject=column.metadata.find {it.key == 'max_string_length'}.value;
+                if(maxStringLengthObject != null)
+                {
+                    long maxStringLength = maxStringLengthObject.toLong()
 
-                if (maxStringLength > Util.MAX_ENUMERATION_VALUE_LENGTH) {
-                    isEnumerationColumn = false
+                    if (maxStringLength > Util.MAX_ENUMERATION_VALUE_LENGTH)
+                    {
+                        isEnumerationColumn = false
+                        log.info(column.label + " has a maximum string length greater than " + Util.MAX_ENUMERATION_VALUE_LENGTH);
+                    }
+                    if (maxStringLength == 0)
+                    {
+                        isEnumerationColumn = false
+                        log.info(column.label + " appears to be empty");
+                    }
                 }
+
             }
 
             // Only strings, numbers, or date types
             if(!Util.isString(column) && !Util.isInteger(column) && !Util.isDate(column)){
                 isEnumerationColumn = false
+                log.info(column.label+" is not a string, int nor date: "+column.dataType.label)
             }
 
             // Add it to the list if it passes
@@ -688,7 +705,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         if (!enumerationColumns) {log.trace("No enumerations detected in "+tableName); return }
 
-        log.trace("Ennumerations found in "+tableName+":");
+        log.trace("Enumerations found in "+tableName+":");
         enumerationColumns.forEach{log.trace(it.label) }
         log.trace("")
 
@@ -710,11 +727,16 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         log.info("enumerationValuesMaps")
         log.info(enumerationValuesMaps.toString())
 
-        enumerationColumns.each {DataElement column ->
+        for(DataElement column : enumerationColumns)
+        {
             DataType enumerationType = new DataType(label: "${tableName}.${column.label}")
             enumerationType.domainType = DataType.DataTypeKind.ENUMERATION_TYPE
 
             Map<Object,Object> valueMap=(Map<Object,Object>) enumerationValuesMaps[column.label.toLowerCase()];
+            if(valueMap==null)
+            {
+                continue
+            }
 
             Iterator<Object> valueMapKeysIterator=valueMap.keySet().iterator();
             int idx=0;
@@ -761,14 +783,17 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         List<DataElement> enumerationColumns = dataClass.dataElements.findAll {it.dataType.dataTypeKind == DataType.DataTypeKind.ENUMERATION_TYPE}
 
         if (!enumerationColumns) return
+        log.trace("enumerationColumns.size() "+enumerationColumns.size());
+        log.trace(enumerationColumns.toString())
 
         List<String> subqueries = enumerationColumns.collect {DataElement column ->
-            String columnName = Util.escapeIdentifier(column.label)
+            String columnName = column.label
+            String AS=columnName.toLowerCase()
 
             """\
             (
                 SELECT CAST( to_json(histogram("$columnName")) AS VARCHAR ) FROM "$tableName"
-            ) "$columnName"
+            ) "$AS"
             """.toString()
         }
 
@@ -778,8 +803,16 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         List<Map<String, Object>> summaryMetadataJsonList=Util.resultSetToList(summaryMetadataStatement.executeQuery())
         Map<String, Object> summaryMetadataJson = summaryMetadataJsonList.first()
 
-        enumerationColumns.each {
-            Object reportValueObject=summaryMetadataJson[it.label.toLowerCase()];
+        for(DataElement it : enumerationColumns)
+        {
+            final String AS=it.label.toLowerCase()
+            final Object reportValueObject=summaryMetadataJson[AS];
+
+            if(reportValueObject==null)
+            {
+                log.error("Metadata for enumerations: failed to look up "+tableName+"."+it.label);
+                throw new Exception("Metadata for enumerations: failed to look up "+tableName+"."+it.label)
+            }
 
             log.trace("reportValueObject")
             log.trace(reportValueObject.class.getName())
@@ -902,6 +935,13 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     long highestBinValue=Util.makeHighestIntervalValueForBin(maxLong);
                     long binInterval=Util.makeBinInterval(distinctValuesCountLong,lowestBinValue, highestBinValue);
 
+                    /*log.trace("min .. max {} .. {}",minLong,maxLong)
+                    log.trace("lowestBinValue {}",lowestBinValue);
+                    log.trace("highestBinValue {}",highestBinValue);
+                    log.trace("distinctValuesCountLong {}",distinctValuesCountLong);
+                    log.trace("binInterval {}",binInterval);
+                     */
+
                     // group by binInterval
                     // The SQL needs to convert the value to a bin: lowestBinValue + (floor(value / binInterval) * binInterval)
                     // The interval is binStart to binStart + binInterval -1
@@ -917,7 +957,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                             SELECT binStart, count(*) count
                             FROM
                             (
-                                SELECT $lowestBinValue + CAST(floor("${dataElement.label}"/$binInterval)*$binInterval AS BIGINT) AS binStart
+                                SELECT $lowestBinValue + CAST(floor(("${dataElement.label}" - $lowestBinValue)/$binInterval)*$binInterval AS BIGINT) AS binStart
                                 FROM "$tableName"
                                 WHERE binStart IS NOT NULL
                                 ORDER BY binStart
@@ -1001,7 +1041,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     log.info(databaseResults.toString())
                 }
 
-        log.info('Testing DDL...')
+        log.info('Testing if DDL works...')
 
                 {
                     String ddlSql = 'CREATE TABLE TestTable (i INTEGER);'
