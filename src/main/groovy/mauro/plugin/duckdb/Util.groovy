@@ -257,4 +257,14 @@ class Util
     {
         metadataList.find {it.key == key && it.namespace == namespace}
     }
+
+    static String sanitiseForMauroLabel(final String label)
+    {
+        if(label.indexOf('|')==-1 && label.indexOf('@')==-1 && label.indexOf('$')==-1)
+        {
+            return label;
+        }
+        return label.replace('|',':').replace('@',' ').replace('$','_');
+    }
+
 }

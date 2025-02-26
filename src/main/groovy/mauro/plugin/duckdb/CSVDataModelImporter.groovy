@@ -317,7 +317,8 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             final String[] sniffs=new String[]
             {
                     "('"+child.toString()+"', header=true, normalize_names=true,  sample_size=2048000)",
-                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000)"
+                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000)",
+                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
             };
 
             boolean anyWorked=false;
@@ -440,7 +441,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             // // Import DataElements
             columnResults.each {columnMap ->
-                DataElement dataElement = new DataElement(label: Util.normaliseLabelCase((String) columnMap.column_name), minMultiplicity: columnMap.is_nullable ? 0 : 1, maxMultiplicity: 1, dataType: dataTypeMap[columnMap.data_type], description: columnMap.comment, order: ((String) columnMap.ordinal_position).toInteger())
+                DataElement dataElement = new DataElement(label: Util.sanitiseForMauroLabel(Util.normaliseLabelCase((String) columnMap.column_name)), minMultiplicity: columnMap.is_nullable ? 0 : 1, maxMultiplicity: 1, dataType: dataTypeMap[columnMap.data_type], description: columnMap.comment, order: ((String) columnMap.ordinal_position).toInteger())
 
                 addDuckResultsAsMetadata(dataElement, columnMap);
 
@@ -517,7 +518,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             final String filename=child.getFileName().toString()
             final String folderName=Util.normaliseLabelCase(removeFileNameSuffixes( filename  ))
 
-            final DataClass dataClass = new DataClass(label: folderName)
+            final DataClass dataClass = new DataClass(label: Util.sanitiseForMauroLabel(folderName))
             addClass(parent,dataClass)
 
             final File[] files=child.toFile().listFiles();
@@ -662,7 +663,12 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             // otherwise it's just an enumeration of single values
 
             long totalValues= dataClass.metadata.find {it.key == 'row_count'}.value.toLong()
-
+            if(totalValues == 0)
+            {
+                isEnumerationColumn = false
+                log.info(column.label + " appears to be empty");
+            }
+            else
             if((distinctValues / totalValues) > 0.99)
             {
                 isEnumerationColumn = false
@@ -729,7 +735,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         for(DataElement column : enumerationColumns)
         {
-            DataType enumerationType = new DataType(label: "${tableName}.${column.label}")
+            DataType enumerationType = new DataType(label: Util.sanitiseForMauroLabel("${tableName}.${column.label}"))
             enumerationType.domainType = DataType.DataTypeKind.ENUMERATION_TYPE
 
             Map<Object,Object> valueMap=(Map<Object,Object>) enumerationValuesMaps[column.label.toLowerCase()];
@@ -753,7 +759,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     log.trace(str)
                 }
                 if (str) {
-                    enumerationType.enumerationValues << new EnumerationValue(label: str, key: str, value: str, order: idx)
+                    enumerationType.enumerationValues << new EnumerationValue(key: Util.sanitiseForMauroLabel(str), value: str, order: idx)
                 } else {
                     log.warn "enumeration value is null/blank! str: [$str], for column [${tableName}.${column.label}]"
                 }
@@ -817,7 +823,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             String reportValue=reportValueObject.toString();
 
-            SummaryMetadata summaryMetadata = new SummaryMetadata(label: it.label, summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
+            SummaryMetadata summaryMetadata = new SummaryMetadata(label: Util.sanitiseForMauroLabel(it.label), summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
             summaryMetadata.summaryMetadataReports << new SummaryMetadataReport(reportValue: reportValue, reportDate: Instant.now())
             it.summaryMetadata << summaryMetadata
             dataClass.summaryMetadata << summaryMetadata
@@ -986,7 +992,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         dateAndNumericElements.findAll {histogramJson[it.label.toLowerCase()]}.each {
             Object reportValueObject=histogramJson[it.label.toLowerCase()]
             String reportValue=reportValueObject.toString();
-            SummaryMetadata summaryMetadata = new SummaryMetadata(label: it.label, summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
+            SummaryMetadata summaryMetadata = new SummaryMetadata(label: Util.sanitiseForMauroLabel(it.label), summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
             summaryMetadata.summaryMetadataReports << new SummaryMetadataReport(reportValue: reportValue, reportDate: Instant.now())
             it.summaryMetadata << summaryMetadata
             dataClass.summaryMetadata << summaryMetadata
@@ -1001,7 +1007,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
     private static AdministeredItem addDuckResultsAsMetadata(AdministeredItem item, Map<String, Object> results) {
         results.findAll {it.key && it.value}.each {
             if (it.key != 'table_catalog' && it.key != 'table_schema') {
-                item.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: it.key, value: it.value))
+                item.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: Util.sanitiseForMauroLabel(it.key), value: it.value))
             }
         }
         item
