@@ -743,21 +743,19 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             while(valueMapKeysIterator.hasNext())
             {
                 final Object keyObject=valueMapKeysIterator.next();
-                Object valueObj=valueMap.get(keyObject)
 
-                String value=String.valueOf(valueObj);
                 String key=keyObject.toString()
                 String str = key.replaceAll("[^\\p{Print}]", "�")
-                value = value.replaceAll("[^\\p{Print}]", "�")
+
                 if (key != str) {
                     log.warn "importEnumerationValues - non printable character(s) removed from enumeration value string for column [${tableName}.${column.label}]"
                     log.trace(key)
                     log.trace(str)
                 }
-                if (str && value) {
-                    enumerationType.enumerationValues << new EnumerationValue(label: str, key: str, value: value, order: idx)
+                if (str) {
+                    enumerationType.enumerationValues << new EnumerationValue(label: str, key: str, value: str, order: idx)
                 } else {
-                    log.warn "enumeration value is null/blank! str: [$str], value: [$value] for column [${tableName}.${column.label}]"
+                    log.warn "enumeration value is null/blank! str: [$str], for column [${tableName}.${column.label}]"
                 }
 
                 idx++;
