@@ -428,7 +428,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 String labelString=(String) label
 
                 DataType dataType = new DataType(dataTypeKind: DataType.DataTypeKind.PRIMITIVE_TYPE, label: labelString)
-                dataType.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: Util.getMauroDataType(labelString)))
+                addMetadata(dataType.metadata,new Metadata(namespace: NAMESPACE_EXPLORER_QUERY, key: 'querybuildertype', value: Util.getMauroDataType(labelString)))
 
                 log.info(labelString+" -> "+Util.getMauroDataType(labelString));
 
@@ -470,9 +470,8 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     if(distinctValuesCount!=null && rowCount!=null)
                     {
                         final float entropy=Util.calculateBasicEntropy(Long.parseLong(distinctValuesCount.value,10), Long.parseLong(rowCount.value,10))
-
-                        dataElement.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: entropy))
-                        dataElement.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: entropy))
+                        addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: entropy))
+                        addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: entropy))
                     }
 
                 }
@@ -612,18 +611,19 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         PreparedStatement countsStatement = connection.prepareStatement(query)
         Map<String, Object> counts = Util.resultSetToList(countsStatement.executeQuery()).first()
 
-        dataClass.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'row_count', value: counts['__count_all']))
+
+        addMetadata(dataClass.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'row_count', value: counts['__count_all']))
         dataClass.dataElements.each {DataElement dataElement ->
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'distinct_values_count', value: counts[dataElement.label.toLowerCase()]))
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'distinctValuesCount', value: counts[dataElement.label.toLowerCase()] ))
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'rowCount', value: counts['__count_all'] ))
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'notNullValuesCount', value: counts[ (dataElement.label.toLowerCase() + '_not_null') ] ))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'distinct_values_count', value: counts[dataElement.label.toLowerCase()]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'distinctValuesCount', value: counts[dataElement.label.toLowerCase()] ))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'rowCount', value: counts['__count_all'] ))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'notNullValuesCount', value: counts[ (dataElement.label.toLowerCase() + '_not_null') ] ))
 
 
         }
         dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
         }
         dataClass.dataElements.findAll {Util.isString(it) }.each {DataElement dataElement ->
             Object max_len=counts[(dataElement.label.toLowerCase() + '_max_len') ];
@@ -631,7 +631,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             {
                 max_len=0L;
             }
-            dataElement.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: 'max_string_length', value: max_len))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_string_length', value: max_len))
         }
     }
 
@@ -829,9 +829,9 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             dataClass.summaryMetadata << summaryMetadata
 
             JsonSlurper slurper=new JsonSlurper()
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: Util.calculateEntropy( (Map) slurper.parseText(reportValue) ) ))
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'imbalance', value: Util.calculateImbalance( (Map) slurper.parseText(reportValue) ) ))
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: Util.calculateSuggestionIndex( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: Util.calculateEntropy( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'imbalance', value: Util.calculateImbalance( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: Util.calculateSuggestionIndex( (Map) slurper.parseText(reportValue) ) ))
         }
     }
 
@@ -998,16 +998,16 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             dataClass.summaryMetadata << summaryMetadata
 
             JsonSlurper slurper=new JsonSlurper()
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: Util.calculateEntropy( (Map) slurper.parseText(reportValue) ) ))
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'imbalance', value: Util.calculateImbalance( (Map) slurper.parseText(reportValue) ) ))
-            it.metadata.add(new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: Util.calculateSuggestionIndex( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'entropy', value: Util.calculateEntropy( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'imbalance', value: Util.calculateImbalance( (Map) slurper.parseText(reportValue) ) ))
+            addMetadata(it.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'suggestionIndex', value: Util.calculateSuggestionIndex( (Map) slurper.parseText(reportValue) ) ))
         }
     }
 
     private static AdministeredItem addDuckResultsAsMetadata(AdministeredItem item, Map<String, Object> results) {
         results.findAll {it.key && it.value}.each {
             if (it.key != 'table_catalog' && it.key != 'table_schema') {
-                item.metadata.add(new Metadata(namespace: NAMESPACE_ME, key: Util.sanitiseForMauroLabel(it.key), value: it.value))
+                addMetadata(item.metadata,new Metadata(namespace: NAMESPACE_ME, key: Util.sanitiseForMauroLabel(it.key), value: it.value))
             }
         }
         item
@@ -1052,6 +1052,15 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     PreparedStatement testDDLStatement = connection.prepareStatement(ddlSql)
                     assert testDDLStatement.execute()
                 }
+    }
+
+    private static void addMetadata(final List<Metadata> list, final Metadata metadata)
+    {
+        if(list==null){return;}
+        if(metadata==null){return;}
+        if(metadata.value==null){return;}
+
+        list.add(metadata)
     }
 
 
