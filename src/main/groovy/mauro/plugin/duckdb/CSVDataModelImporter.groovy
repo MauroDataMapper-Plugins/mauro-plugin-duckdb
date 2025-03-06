@@ -652,46 +652,48 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         {
             boolean isEnumerationColumn = true
 
-            final long distinctValues = column.metadata.find {it.key == 'distinct_values_count'}.value.toLong()
+            final Metadata distinctValuesMetadata=column.metadata.find {it.key == 'distinct_values_count'}
+            if(distinctValuesMetadata!=null) {
+                final long distinctValues = distinctValuesMetadata.value.toLong()
 
-            if (distinctValues > Util.MAX_ENUMERATION_VALUES) {
-               isEnumerationColumn = false
-                log.info(column.label+" has more than "+Util.MAX_ENUMERATION_VALUES+" distinct values: "+distinctValues);
-            }
+                if (distinctValues > Util.MAX_ENUMERATION_VALUES) {
+                    isEnumerationColumn = false
+                    log.info(column.label + " has more than " + Util.MAX_ENUMERATION_VALUES + " distinct values: " + distinctValues);
+                }
 
-            // The number of distinct values must be different to the number of values in total
-            // otherwise it's just an enumeration of single values
+                // The number of distinct values must be different to the number of values in total
+                // otherwise it's just an enumeration of single values
 
-            long totalValues= dataClass.metadata.find {it.key == 'row_count'}.value.toLong()
-            if(totalValues == 0)
-            {
-                isEnumerationColumn = false
-                log.info(column.label + " appears to be empty");
-            }
-            else
-            if((distinctValues / totalValues) > 0.99)
-            {
-                isEnumerationColumn = false
-                log.info(column.label+" has more than 0.99 distinctValues / totalValues ");
+                final Metadata totalValuesMetadata = dataClass.metadata.find { it.key == 'row_count' }
+                if (totalValuesMetadata != null) {
+                    long totalValues = totalValuesMetadata.value.toLong()
+                    if (totalValues == 0) {
+                        isEnumerationColumn = false
+                        log.info(column.label + " appears to be empty");
+                    } else if ((distinctValues / totalValues) > 0.99) {
+                        isEnumerationColumn = false
+                        log.info(column.label + " has more than 0.99 distinctValues / totalValues ");
+                    }
+                }
             }
 
             // Strings have a maximum length
             if(Util.isString(column))
             {
-                final Object maxStringLengthObject=column.metadata.find {it.key == 'max_string_length'}.value;
-                if(maxStringLengthObject != null)
-                {
-                    long maxStringLength = maxStringLengthObject.toLong()
+                final Metadata maxStringLengthObjectMetadata=column.metadata.find {it.key == 'max_string_length'}
+                if(maxStringLengthObjectMetadata!=null) {
+                    final Object maxStringLengthObject = maxStringLengthObjectMetadata.value;
+                    if (maxStringLengthObject != null) {
+                        long maxStringLength = maxStringLengthObject.toLong()
 
-                    if (maxStringLength > Util.MAX_ENUMERATION_VALUE_LENGTH)
-                    {
-                        isEnumerationColumn = false
-                        log.info(column.label + " has a maximum string length greater than " + Util.MAX_ENUMERATION_VALUE_LENGTH);
-                    }
-                    if (maxStringLength == 0)
-                    {
-                        isEnumerationColumn = false
-                        log.info(column.label + " appears to be empty");
+                        if (maxStringLength > Util.MAX_ENUMERATION_VALUE_LENGTH) {
+                            isEnumerationColumn = false
+                            log.info(column.label + " has a maximum string length greater than " + Util.MAX_ENUMERATION_VALUE_LENGTH);
+                        }
+                        if (maxStringLength == 0) {
+                            isEnumerationColumn = false
+                            log.info(column.label + " appears to be empty");
+                        }
                     }
                 }
 
@@ -840,27 +842,31 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         List<String> histogramSelects = dateAndNumericElements.collect { DataElement dataElement ->
             if (Util.isDate(dataElement)) {
-                String minValue = dataElement.metadata.find {it.key == 'min_value'}.value
-                String maxValue = dataElement.metadata.find {it.key == 'max_value'}.value
-                if (minValue && maxValue) {
 
-                    try {
-                        LocalDate minDate=Util.parseISO_LOCAL_DATE(minValue);
-                        LocalDate maxDate=Util.parseISO_LOCAL_DATE(maxValue);
+                Metadata minMetadata=dataElement.metadata.find {it.key == 'min_value'}
+                Metadata maxMetadata=dataElement.metadata.find {it.key == 'max_value'}
+                if(minMetadata !=null && maxMetadata!=null) {
 
-                        Period timePeriod=Period.between(minDate,maxDate);
-                        int days=timePeriod.getDays()
+                    String minValue = minMetadata.value
+                    String maxValue = maxMetadata.value
+                    if (minValue && maxValue) {
 
-                        if (days > 7000)
-                        {
-                            // group by decades
-                            long binInterval=10L;
-                            """\
+                        try {
+                            LocalDate minDate = Util.parseISO_LOCAL_DATE(minValue);
+                            LocalDate maxDate = Util.parseISO_LOCAL_DATE(maxValue);
+
+                            Period timePeriod = Period.between(minDate, maxDate);
+                            int days = timePeriod.getDays()
+
+                            if (days > 7000) {
+                                // group by decades
+                                long binInterval = 10L;
+                                """\
                             (
                                 SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
                                 FROM
                                 (
-                                    SELECT concat(binStart,'-',binStart+${binInterval-1}) keyName , count
+                                    SELECT concat(binStart,'-',binStart+${binInterval - 1}) keyName , count
                                     FROM
                                     (
                                         SELECT binStart, count(*) count
@@ -877,11 +883,9 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                                 )
                                 ) "${dataElement.label.toLowerCase()}"
                             """
-                        }
-                        else
-                        {
-                            // group by years
-                            """\
+                            } else {
+                                // group by years
+                                """\
                             (
                                 SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
                                 FROM
@@ -903,59 +907,61 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                                 )
                                 ) "${dataElement.label.toLowerCase()}"
                             """
+                            }
                         }
-                    }
-                    catch(DateTimeParseException dtpe)
-                    {
-                        log.error("Histogram. Date parse error in "+tableName+"."+dataElement.label);
-                        log.error("minValue="+minValue);
-                        log.error("maxValue="+maxValue);
+                        catch (DateTimeParseException dtpe) {
+                            log.error("Histogram. Date parse error in " + tableName + "." + dataElement.label);
+                            log.error("minValue=" + minValue);
+                            log.error("maxValue=" + maxValue);
+                        }
                     }
                 }
             }
             else
-            if(Util.isInteger(dataElement)){
-                String minValue = dataElement.metadata.find {it.key == 'min_value'}.value
-                String maxValue = dataElement.metadata.find {it.key == 'max_value'}.value
-                String distinctValuesCount = dataElement.metadata.find {it.key == 'distinct_values_count'}.value
+            if(Util.isInteger(dataElement)) {
+                Metadata minMetadata = dataElement.metadata.find { it.key == 'min_value' }
+                Metadata maxMetadata = dataElement.metadata.find { it.key == 'max_value' }
+                Metadata distinctValuesCountMetadata = dataElement.metadata.find { it.key == 'distinct_values_count' }
 
-                if(minValue && maxValue)
-                {
-                    final long minLong=Long.parseLong(minValue,10);
-                    final long maxLong=Long.parseLong(maxValue,10);
+                if (minMetadata != null && maxMetadata != null && distinctValuesCountMetadata != null) {
+                    String minValue = minMetadata.value
+                    String maxValue = maxMetadata.value
+                    String distinctValuesCount = distinctValuesCountMetadata.value
 
-                    final long interval=maxLong-maxLong;
+                    if (minValue && maxValue) {
+                        final long minLong = Long.parseLong(minValue, 10);
+                        final long maxLong = Long.parseLong(maxValue, 10);
 
-                    long distinctValuesCountLong;
-                    if(distinctValuesCount) {
-                        distinctValuesCountLong = Long.parseLong(distinctValuesCount, 10);
-                    }
-                    else
-                    {
-                        distinctValuesCountLong=interval;
-                    }
+                        final long interval = maxLong - maxLong;
 
-                    long lowestBinValue=Util.makeLowestIntervalValueForBin(minLong);
-                    long highestBinValue=Util.makeHighestIntervalValueForBin(maxLong);
-                    long binInterval=Util.makeBinInterval(distinctValuesCountLong,lowestBinValue, highestBinValue);
+                        long distinctValuesCountLong;
+                        if (distinctValuesCount) {
+                            distinctValuesCountLong = Long.parseLong(distinctValuesCount, 10);
+                        } else {
+                            distinctValuesCountLong = interval;
+                        }
 
-                    /*log.trace("min .. max {} .. {}",minLong,maxLong)
+                        long lowestBinValue = Util.makeLowestIntervalValueForBin(minLong);
+                        long highestBinValue = Util.makeHighestIntervalValueForBin(maxLong);
+                        long binInterval = Util.makeBinInterval(distinctValuesCountLong, lowestBinValue, highestBinValue);
+
+                        /*log.trace("min .. max {} .. {}",minLong,maxLong)
                     log.trace("lowestBinValue {}",lowestBinValue);
                     log.trace("highestBinValue {}",highestBinValue);
                     log.trace("distinctValuesCountLong {}",distinctValuesCountLong);
                     log.trace("binInterval {}",binInterval);
                      */
 
-                    // group by binInterval
-                    // The SQL needs to convert the value to a bin: lowestBinValue + (floor(value / binInterval) * binInterval)
-                    // The interval is binStart to binStart + binInterval -1
+                        // group by binInterval
+                        // The SQL needs to convert the value to a bin: lowestBinValue + (floor(value / binInterval) * binInterval)
+                        // The interval is binStart to binStart + binInterval -1
 
-                    """\
+                        """\
                     (
                     SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
                     FROM
                     (
-                        SELECT concat(binStart,'-',binStart+${binInterval-1}) keyName , count
+                        SELECT concat(binStart,'-',binStart+${binInterval - 1}) keyName , count
                         FROM
                         (
                             SELECT binStart, count(*) count
@@ -972,6 +978,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     )
                     ) "${dataElement.label.toLowerCase()}"
                     """
+                    }
                 }
             }
         }.findAll() as List<String>
