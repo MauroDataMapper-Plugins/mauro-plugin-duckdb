@@ -1,7 +1,7 @@
 package mauro.plugin.duckdb
 
-import uk.ac.ox.softeng.mauro.plugin.importer.config.ImportGroupConfig
-import uk.ac.ox.softeng.mauro.plugin.importer.config.ImportParameterConfig
+import org.maurodata.plugin.importer.config.ImportGroupConfig
+import org.maurodata.plugin.importer.config.ImportParameterConfig
 
 class CSVImportParams extends DuckDBImportParams {
     @ImportParameterConfig(

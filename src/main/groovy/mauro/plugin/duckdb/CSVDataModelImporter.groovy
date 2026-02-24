@@ -3,19 +3,19 @@ package mauro.plugin.duckdb
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 import io.micronaut.context.annotation.Bean
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataClass
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataElement
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataModel
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataModelType
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataType
-import uk.ac.ox.softeng.mauro.domain.datamodel.EnumerationValue
-import uk.ac.ox.softeng.mauro.domain.facet.Metadata
-import uk.ac.ox.softeng.mauro.domain.facet.SummaryMetadata
-import uk.ac.ox.softeng.mauro.domain.facet.SummaryMetadataType
-import uk.ac.ox.softeng.mauro.domain.model.AdministeredItem
-import uk.ac.ox.softeng.mauro.domain.model.SummaryMetadataReport
-import uk.ac.ox.softeng.mauro.plugin.importer.DataModelImporterPlugin
-import uk.ac.ox.softeng.mauro.plugin.importer.FileParameter
+import org.maurodata.domain.datamodel.DataClass
+import org.maurodata.domain.datamodel.DataElement
+import org.maurodata.domain.datamodel.DataModel
+import org.maurodata.domain.datamodel.DataModelType
+import org.maurodata.domain.datamodel.DataType
+import org.maurodata.domain.datamodel.EnumerationValue
+import org.maurodata.domain.facet.Metadata
+import org.maurodata.domain.facet.SummaryMetadata
+import org.maurodata.domain.facet.SummaryMetadataReport
+import org.maurodata.domain.facet.SummaryMetadataType
+import org.maurodata.domain.model.AdministeredItem
+import org.maurodata.plugin.importer.DataModelImporterPlugin
+import org.maurodata.plugin.importer.FileParameter
 
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
@@ -40,7 +40,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
     static final String NAMESPACE_ME=CSVDataModelImporter.packageName;
     static final String NAMESPACE_EXPLORER='uk.ac.ox.softeng.maurodatamapper.plugins.explorer.research';
     static final String NAMESPACE_EXPLORER_QUERY='uk.ac.ox.softeng.maurodatamapper.plugins.explorer.querybuilder';
-    
+
     @Override
     List<DataModel> importDomain(CSVImportParams params) {
 
@@ -464,7 +464,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     // Use the distinct count and the number of rows to create a basic measure of entropy - and this will become the suggestionIndex
                     // imbalance would be 1.0-entropy, but it would be such a crude measure, there is no reason to include it.
 
-                    final Metadata distinctValuesCount=Util.getMetadata(dataElement.metadata,NAMESPACE_EXPLORER,'distinctValuesCount');
+                    final Metadata distinctValuesCount=Util.getMetadata(dataElement.metadata, NAMESPACE_EXPLORER, 'distinctValuesCount');
                     final Metadata rowCount=Util.getMetadata(dataElement.metadata,NAMESPACE_EXPLORER,'rowCount');
 
                     if(distinctValuesCount!=null && rowCount!=null)

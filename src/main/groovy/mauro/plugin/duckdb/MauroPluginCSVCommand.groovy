@@ -3,10 +3,10 @@ package mauro.plugin.duckdb
 import groovy.util.logging.Slf4j
 import io.micronaut.configuration.picocli.PicocliRunner
 import jakarta.inject.Inject
+import org.maurodata.domain.datamodel.DataModel
+import org.maurodata.plugin.importer.FileParameter
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataModel
-import uk.ac.ox.softeng.mauro.plugin.importer.FileParameter
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -38,8 +38,8 @@ class MauroPluginCSVCommand implements Runnable {
     void run() {
         CSVImportParams params = new CSVImportParams
         (
-                importFile: new FileParameter(sourceFile,"",new byte[0]),
-                modelName: modelName
+            importFile: new FileParameter(sourceFile, "", new byte[0]),
+            modelName: modelName
         )
         log.info 'Importing DataModel...'
         DataModel dataModel = csvDataModelImporter.importDomain(params).first()
