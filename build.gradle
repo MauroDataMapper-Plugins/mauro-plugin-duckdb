@@ -28,17 +28,17 @@ dependencies {
     implementation("io.micronaut.sql:micronaut-jdbc-hikari")
 //    runtimeOnly("com.zaxxer:HikariCP:5.1.0")
 
-    implementation (group: 'com.databricks', name: 'databricks-jdbc', version: '2.6.38')
     implementation (group: 'org.duckdb', name: 'duckdb_jdbc', version: '1.2.0')
-    implementation 'uk.ac.ox.softeng.mauro:mauro-domain:0.0.1-SNAPSHOT'
+    implementation 'org.maurodata:mauro-domain:0.0.2-beta'
 
     implementation group: 'org.apache.commons', name: 'commons-csv', version: '1.12.0'
 }
 
 
 application {
-    mainClass = "mauro.plugin.databricks.MauroPluginDatabricksCommand"
+    mainClass = "mauro.plugin.duckdb.MauroPluginCSVCommand"
 }
+
 java {
     sourceCompatibility = JavaVersion.toVersion("17")
     targetCompatibility = JavaVersion.toVersion("17")
@@ -52,6 +52,3 @@ micronaut {
         annotations("mauro.plugin.databricks.*")
     }
 }
-
-
-

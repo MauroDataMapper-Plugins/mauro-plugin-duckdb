@@ -1,7 +1,8 @@
 package mauro.plugin.duckdb
 
-import uk.ac.ox.softeng.mauro.domain.datamodel.DataElement
-import uk.ac.ox.softeng.mauro.domain.facet.Metadata
+import org.maurodata.domain.datamodel.DataElement
+import org.maurodata.domain.facet.Metadata
+
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
 import java.time.LocalDate
@@ -253,7 +254,7 @@ class Util
 
     /* Check for existence of metadata */
 
-    static Metadata getMetadata(final List<Metadata> metadataList,final String namespace,final String key)
+    static Metadata getMetadata(final List<Metadata> metadataList, final String namespace, final String key)
     {
         metadataList.find {it.key == key && it.namespace == namespace}
     }

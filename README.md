@@ -14,6 +14,12 @@ Extract metadata from CSV via DuckDB schema to Mauro JSON
   -V, --version           Print version information and exit.
 ```
 
+Example using gradlew:
+
+```bash
+./gradlew run --args='-s csv_directory -o csv_datamodel.json'
+```
+
 ---
 
 ### Micronaut 4.5.0 Documentation

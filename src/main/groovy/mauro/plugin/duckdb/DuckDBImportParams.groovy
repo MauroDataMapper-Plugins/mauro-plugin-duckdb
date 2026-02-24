@@ -1,9 +1,8 @@
 package mauro.plugin.duckdb
 
-
-import uk.ac.ox.softeng.mauro.plugin.importer.FileImportParameters
-import uk.ac.ox.softeng.mauro.plugin.importer.config.ImportGroupConfig
-import uk.ac.ox.softeng.mauro.plugin.importer.config.ImportParameterConfig
+import org.maurodata.plugin.importer.FileImportParameters
+import org.maurodata.plugin.importer.config.ImportGroupConfig
+import org.maurodata.plugin.importer.config.ImportParameterConfig
 
 class DuckDBImportParams extends FileImportParameters {
 
