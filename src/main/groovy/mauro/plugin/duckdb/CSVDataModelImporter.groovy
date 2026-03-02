@@ -28,8 +28,8 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import java.time.Instant
 import java.time.LocalDate
-import java.time.Period
 import java.time.format.DateTimeParseException
+import java.time.temporal.ChronoUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -854,9 +854,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                         try {
                             LocalDate minDate = Util.parseISO_LOCAL_DATE(minValue);
                             LocalDate maxDate = Util.parseISO_LOCAL_DATE(maxValue);
-
-                            Period timePeriod = Period.between(minDate, maxDate);
-                            int days = timePeriod.getDays()
+                            long days = ChronoUnit.DAYS.between(minDate, maxDate)
 
                             if (days > 7000) {
                                 // group by decades
