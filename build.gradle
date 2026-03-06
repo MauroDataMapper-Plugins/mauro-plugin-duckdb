@@ -1,12 +1,13 @@
 plugins {
     id("groovy")
-    id("com.github.johnrengelman.shadow") version "8.1.1"
-    id("io.micronaut.application") version "4.4.0"
-
+    id("io.micronaut.application") version "4.6.1"
+    id("io.micronaut.aot") version "4.6.1"
+    id("com.gradleup.shadow") version "8.3.6"
+    id("maven-publish")
 }
 
-version = "0.1"
-group = "mauro.plugin.duckdb"
+version = "0.0.1-SNAPSHOT"
+group = "org.maurodata.plugins"
 
 repositories {
     mavenCentral()
@@ -46,9 +47,44 @@ java {
 
 
 micronaut {
+    runtime("netty")
     testRuntime("spock2")
     processing {
         incremental(true)
-        annotations("mauro.plugin.databricks.*")
+        annotations("uk.ac.ox.softeng.mauro.*", "org.maurodata.*")
+    }
+    aot {
+        // Please review carefully the optimizations enabled below
+        // Check https://micronaut-projects.github.io/micronaut-aot/latest/guide/ for more details
+        optimizeServiceLoading = false
+        convertYamlToJava = false
+        precomputeOperations = true
+        cacheEnvironment = true
+        optimizeClassLoading = true
+        deduceEnvironment = true
+        optimizeNetty = true
     }
 }
+
+plugins.withId("maven-publish") {
+    publishing {
+        publications {
+            create("mavenJava", MavenPublication) {
+                from(components["java"])
+                artifactId = "${rootProject.name}"
+            }
+        }
+
+        repositories {
+            maven {
+                name = "MauroSnapshotRepository"
+                url = "https://mauro-repository.com/libs-snapshot-local"
+                credentials(PasswordCredentials)
+                authentication {
+                    basic(BasicAuthentication)
+                }
+            }
+        }
+    }
+}
+
