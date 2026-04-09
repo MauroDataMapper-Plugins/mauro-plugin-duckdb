@@ -650,30 +650,19 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         for(DataElement column : dataClass.dataElements)
         {
-            boolean isEnumerationColumn = true
+            boolean isEnumerationColumn = false
+            final Metadata distinctValuesMetadata = column.metadata.find {it.key == 'distinct_values_count'}
+            final Metadata notNullValuesCountMetadata = column.metadata.find {it.key == 'notNullValuesCount'}
 
-            final Metadata distinctValuesMetadata=column.metadata.find {it.key == 'distinct_values_count'}
-            if(distinctValuesMetadata!=null) {
-                final long distinctValues = distinctValuesMetadata.value.toLong()
+            if (notNullValuesCountMetadata != null && distinctValuesMetadata != null) {
+                final long notNullValuesCount = notNullValuesCountMetadata.value.toLong()
+                long distinctValuesIncludingNull = distinctValuesMetadata.value.toLong()+1
 
-                if (distinctValues > Util.MAX_ENUMERATION_VALUES) {
-                    isEnumerationColumn = false
-                    log.info(column.label + " has more than " + Util.MAX_ENUMERATION_VALUES + " distinct values: " + distinctValues);
-                }
-
-                // The number of distinct values must be different to the number of values in total
-                // otherwise it's just an enumeration of single values
-
-                final Metadata totalValuesMetadata = dataClass.metadata.find { it.key == 'row_count' }
-                if (totalValuesMetadata != null) {
-                    long totalValues = totalValuesMetadata.value.toLong()
-                    if (totalValues == 0) {
-                        isEnumerationColumn = false
-                        log.info(column.label + " appears to be empty");
-                    } else if ((distinctValues / totalValues) > 0.99) {
-                        isEnumerationColumn = false
-                        log.info(column.label + " has more than 0.99 distinctValues / totalValues ");
-                    }
+                if (notNullValuesCount == 0) {
+                    log.warn('excluding {}.{} as enumeration, column is all null', dataClass.label, column.label)
+                } else if (distinctValuesIncludingNull/notNullValuesCount < 0.1 && distinctValuesIncludingNull < Util.MAX_ENUMERATION_VALUES) {
+                    isEnumerationColumn = true
+                    log.warn('excluding {}.{} as enumeration, values are too distinct', dataClass.label, column.label)
                 }
             }
 
