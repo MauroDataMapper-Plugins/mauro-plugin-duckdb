@@ -621,10 +621,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
 
         }
-        dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
-        }
+//        dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
+//            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
+//            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
+//        }
         dataClass.dataElements.findAll {Util.isString(it) }.each {DataElement dataElement ->
             Object max_len=counts[(dataElement.label.toLowerCase() + '_max_len') ];
             if(max_len==null)
