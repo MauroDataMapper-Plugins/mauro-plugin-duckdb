@@ -477,6 +477,18 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 }
             }
 
+            // Remove meta data for numeric and date max and min values
+
+            for (DataElement dataElement : dataClass.dataElements) {
+                Metadata minMetadata=dataElement.metadata.find {it.key == 'min_value'}
+                Metadata maxMetadata=dataElement.metadata.find {it.key == 'max_value'}
+                if(minMetadata) {
+                    dataElement.metadata.remove(minMetadata)
+                }
+                if(maxMetadata) {
+                    dataElement.metadata.remove(maxMetadata)
+                }
+            }
 
             // Drop the table - avoids naming clashes
 
@@ -621,10 +633,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
 
         }
-//        dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
-//            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
-//            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
-//        }
+        dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
+        }
         dataClass.dataElements.findAll {Util.isString(it) }.each {DataElement dataElement ->
             Object max_len=counts[(dataElement.label.toLowerCase() + '_max_len') ];
             if(max_len==null)
