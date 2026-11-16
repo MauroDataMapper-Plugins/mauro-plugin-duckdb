@@ -1,17 +1,87 @@
 ## Usage
 
 ```
-Usage: mauro-plugin-duckdb-csv [-hV] [-m=<modelName>] -o=<output>
-                               -s=<sourceFile> [@<filename>...]
-Extract metadata from CSV via DuckDB schema to Mauro JSON
-      [@<filename>...]    One or more argument files containing options.
-  -h, --help              Show this help message and exit.
+Usage: mauro-plugin-duckdb-csv [-hV] [--[no-]detect-enumerations]
+       [--[no-]detect-types] [--[no-]first-row-is-header]
+       [--[no-]generate-summary-metadata] [--headers=<headers>]
+       [-m=<modelName>] [--max-enumerations=<maxEnumerations>]
+       [--metadata-namespace=<metadataNamespace>] -o=<output>
+       [--output-structure=<outputStructure>] -s=<sourceFile>
+       [--enum-given-adornment=<enumGivenAdornment>[,<enumGivenAdornment>...]]...
+       [--enum-ignore-column=<enumIgnoreColumn>[,<enumIgnoreColumn>...]]...
+       [--enum-ignore-column-like=<enumIgnoreColumnLike>[,<enumIgnoreColumnLike>...]]...
+       [--enum-lookup-adornment=<enumLookupAdornment>[,<enumLookupAdornment>...]]...
+       [--exclude-schema=<excludeSchemas>[,<excludeSchemas>...]]...
+       [--excluded-columns=<excludeColumnsLike>[,<excludeColumnsLike>...]]...
+       [--excluded-tables=<excludeTablesLike>[,<excludeTablesLike>...]]...
+       [--include-schema=<includeSchemas>[,<includeSchemas>...]]...
+       [--included-columns=<includeColumnsLike>[,<includeColumnsLike>...]]...
+       [--included-tables=<includeTablesLike>[,<includeTablesLike>...]]...
+       [@<filename>...]
+Catalogue CSV, TSV, PSV, or TAB extracts as Mauro data models.
+      [@<filename>...]      One or more argument files containing options.
+      --[no-]detect-enumerations
+                            Detect enumeration columns (use
+                              --no-detect-enumerations to disable).
+      --[no-]detect-types   Infer column types from CSV values (use
+                              --no-detect-types to import values as strings).
+      --enum-given-adornment=<enumGivenAdornment>[,<enumGivenAdornment>...]
+                            Column suffixes that identify enumerations, e.g.
+                              _IND.
+      --enum-ignore-column=<enumIgnoreColumn>[,<enumIgnoreColumn>...]
+                            Exact column names excluded from enumeration
+                              detection.
+      --enum-ignore-column-like=<enumIgnoreColumnLike>[,
+        <enumIgnoreColumnLike>...]
+                            Column-name fragments excluded from enumeration
+                              detection.
+      --enum-lookup-adornment=<enumLookupAdornment>[,<enumLookupAdornment>...]
+                            Column suffixes that identify coded enumeration
+                              columns.
+      --exclude-schema=<excludeSchemas>[,<excludeSchemas>...]
+                            Exclude directory names matching SQL LIKE
+                              pattern(s), using % and _ wildcards.
+      --excluded-columns=<excludeColumnsLike>[,<excludeColumnsLike>...]
+                            Exclude column names matching SQL LIKE pattern(s),
+                              using % and _ wildcards.
+      --excluded-tables=<excludeTablesLike>[,<excludeTablesLike>...]
+                            Exclude CSV table names matching SQL LIKE
+                              pattern(s), using % and _ wildcards.
+      --[no-]first-row-is-header
+                            Treat the first row as column headers (use
+                              --no-first-row-is-header otherwise).
+      --[no-]generate-summary-metadata
+                            Generate value distribution summaries (use
+                              --no-generate-summary-metadata to disable).
+  -h, --help                Show this help message and exit.
+      --headers=<headers>   Comma-separated replacement headers, used when the
+                              first row is not a header.
+      --include-schema=<includeSchemas>[,<includeSchemas>...]
+                            Include directory names matching SQL LIKE
+                              pattern(s), using % and _ wildcards.
+      --included-columns=<includeColumnsLike>[,<includeColumnsLike>...]
+                            Include column names matching SQL LIKE pattern(s),
+                              using % and _ wildcards.
+      --included-tables=<includeTablesLike>[,<includeTablesLike>...]
+                            Include CSV table names matching SQL LIKE
+                              pattern(s), using % and _ wildcards.
   -m, --model-name=<modelName>
-                          Label of Model
-  -o, --output=<output>   Output file
-  -s, --source=<sourceFile>
-                          The source: zip, csv, or directory
-  -V, --version           Print version information and exit.
+                            Override the generated DataModel or VersionedFolder
+                              label.
+      --max-enumerations=<maxEnumerations>
+                            Maximum distinct values for automatic enumeration
+                              detection.
+      --metadata-namespace=<metadataNamespace>
+                            Override the stable DuckDB namespace used for
+                              source and profiling metadata.
+  -o, --output=<output>     Output JSON file.
+      --output-structure=<outputStructure>
+                            Output structure: DATA_MODEL (default) or
+                              VERSIONED_FOLDER (immediate child directories
+                              become DataModels).
+  -s, --source=<sourceFile> Input CSV/TSV/PSV/TAB file, ZIP archive, or
+                              directory tree.
+  -V, --version             Print version information and exit.
 ```
 
 Example using gradlew:
