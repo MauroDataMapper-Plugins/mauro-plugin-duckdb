@@ -1,0 +1,5 @@
+patient_id,status,comment
+1,ACTIVE,"Contains a comma, and quotes"
+2,INACTIVE,"Line two"
+3,ACTIVE,
+4,UNKNOWN,<null>

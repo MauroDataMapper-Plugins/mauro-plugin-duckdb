@@ -16,7 +16,7 @@ class DuckDBImportParams extends FileImportParameters {
                     order = 2
             )
     )
-    Integer maxEnumerations = 20
+    Integer maxEnumerations = 80
 
     @ImportParameterConfig(
             displayName = 'Generate Summary Metadata',
