@@ -1,0 +1,13 @@
+id,org_name,org_type,org_code,description,org_char
+1,ORG1,TYPEA,CODEY,Description for organisation one,CHAR1
+2,ORG2,TYPEA,CODEY,Description for organisation two,CHAR1
+3,ORG3,TYPEA,CODEY,Description for organisation three,CHAR1
+4,ORG4,TYPEA,CODEY,Description for organisation four,CHAR1
+5,ORG5,TYPEA,CODEY,Description for organisation five,CHAR1
+6,ORG6,TYPEB,CODEZ,Description for organisation six,CHAR2
+7,ORG7,TYPEB,CODEZ,Description for organisation seven,CHAR2
+8,ORG8,TYPEB,CODEZ,Description for organisation eight,CHAR2
+9,ORG9,TYPEB,CODEX,Description for organisation nine,CHAR3
+10,ORG10,TYPEB,CODEX,Description for organisation ten,CHAR3
+11,ORG11,TYPEC,CODEX,Description for organisation eleven,CHAR3
+12,ORG12,TYPEC,CODER,Description for organisation twelve,CHAR3

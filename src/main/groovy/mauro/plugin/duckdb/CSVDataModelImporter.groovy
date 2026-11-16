@@ -37,7 +37,7 @@ import java.util.zip.ZipInputStream
 @Bean
 class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
-    static final String NAMESPACE_ME=CSVDataModelImporter.packageName;
+    static final String NAMESPACE_ME='org.maurodata.plugins.duckdb';
     static final String NAMESPACE_EXPLORER='uk.ac.ox.softeng.maurodatamapper.plugins.explorer.research';
     static final String NAMESPACE_EXPLORER_QUERY='uk.ac.ox.softeng.maurodatamapper.plugins.explorer.querybuilder';
 
@@ -47,6 +47,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         final ArrayList<File> filesToCleanUp = new ArrayList<>(10);
         Connection connection=null;
         DataModel dataModel=null;
+        List<DataModel> importedModels = []
 
         try
         {
@@ -79,9 +80,15 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             if (!fileParameterPointsTo.canRead()) {
                 throw new AccessDeniedException(fileParameter.fileName)
             }
+            if (params.outputStructure && !(params.outputStructure.equalsIgnoreCase('DATA_MODEL') || params.outputStructure.equalsIgnoreCase('VERSIONED_FOLDER'))) {
+                throw new IllegalArgumentException("Unsupported output structure '${params.outputStructure}'; use DATA_MODEL or VERSIONED_FOLDER")
+            }
+            if (params.outputStructure?.equalsIgnoreCase('VERSIONED_FOLDER') && !fileParameterPointsTo.isDirectory()) {
+                throw new IllegalArgumentException('VERSIONED_FOLDER output requires a directory source')
+            }
 
             if (fileParameterPointsTo.isFile() && !hasSuffix(fileParameterPointsTo.getName(), (dataSuffixes + archiveSuffixes))) {
-                new IOException("Unsupported format: " + fileParameterPointsTo.getName() + " : expecting one of: " + (dataSuffixes + archiveSuffixes).join(", "))
+                throw new IOException("Unsupported format: " + fileParameterPointsTo.getName() + " : expecting one of: " + (dataSuffixes + archiveSuffixes).join(", "))
             }
 
             // The file parameter can mean one of three things:
@@ -219,9 +226,22 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             // The root is represented by a DataModel, and has the CSVImportParams parameters added as DataTypes
 
-            dataModel = new DataModel(modelType: DataModelType.DATA_ASSET, label: Util.normaliseLabelCase(modelName))
-
-            recurseDirectory(dataModel, modelChildren, dataModel, connection)
+            if (params.outputStructure?.equalsIgnoreCase('VERSIONED_FOLDER') && fileParameterPointsTo.isDirectory()) {
+                Path sourceRoot = fileParameterPointsTo.toPath()
+                modelChildren.findAll { Files.isDirectory(it) }.sort { it.fileName.toString() }.each { Path modelPath ->
+                    String modelIdentifier = modelPath.fileName.toString()
+                    DataModel childModel = new DataModel(modelType: DataModelType.DATA_ASSET, label: Util.sanitiseForMauroLabel(Util.normaliseLabelCase(modelIdentifier)))
+                    addMetadata(childModel.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot.relativize(modelPath).toString()))
+                    List<Path> modelPathChildren = modelPath.toFile().listFiles()?.collect { it.toPath() } ?: []
+                    recurseDirectory(childModel, new ArrayList<Path>(modelPathChildren), childModel, connection, params, childModel, modelIdentifier, modelPath)
+                    importedModels << childModel
+                }
+            } else {
+                dataModel = new DataModel(modelType: DataModelType.DATA_ASSET, label: Util.sanitiseForMauroLabel(Util.normaliseLabelCase(modelName)))
+                addMetadata(dataModel.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: fileParameterPointsTo.name))
+                recurseDirectory(dataModel, modelChildren, dataModel, connection, params, dataModel, modelName, fileParameterPointsTo.isDirectory() ? fileParameterPointsTo.toPath() : null)
+                importedModels << dataModel
+            }
         }
         finally
         {
@@ -271,7 +291,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 }
             }
         }
-        [ dataModel ]
+        importedModels
     }
 
     private static void addClass(final Object parent, final DataClass child)
@@ -287,7 +307,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         }
     }
 
-    private static void recurseDirectory(final Object parent, final ArrayList<Path> children, final DataModel dataModel, final Connection connection)
+    private static void recurseDirectory(final Object parent, final ArrayList<Path> children, final DataModel dataModel, final Connection connection, final CSVImportParams params, final DataModel rootModel, final String rootName, final Path sourceRoot)
     {
         // Sort by filename
         children.sort {it.getFileName().toString() }
@@ -306,19 +326,26 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 continue
             }
 
-            final String tableName=Util.normaliseLabelCase(removeFileNameSuffixes( filename  ))
+            final String originalTableName=removeFileNameSuffixes(filename)
+            if (!includedBy(originalTableName, params.includeTablesLike) || matchesAny(originalTableName, params.excludeTablesLike)) continue
+            final String tableName=Util.sanitiseForMauroLabel(Util.normaliseLabelCase(originalTableName))
 
             final DataClass dataClass = new DataClass(label: tableName)
+            addMetadata(dataClass.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot == null ? filename : sourceRoot.relativize(child).toString()))
             addClass(parent,dataClass)
 
             // Using a large sample size to get autodetect to fail
             // If it doesn't succeed, try being more specific by setting the quotes and escape quotes
 
+            if (params.firstRowIsHeader == false && !params.headers?.trim()) throw new IllegalArgumentException("Headers must be supplied when the first row is not a header")
+            String csvOptions = "header=${params.firstRowIsHeader != false}, ${params.detectTypes == false ? 'all_varchar=true' : 'auto_detect=true'}, normalize_names=false"
+            if (params.headers?.trim()) csvOptions += ", names=${toDuckList(params.headers.split(',').collect { it.trim() })}"
+            final String csvPath = child.toAbsolutePath().toString().replace("'", "''")
             final String[] sniffs=new String[]
             {
-                    "('"+child.toString()+"', header=true, normalize_names=true,  sample_size=2048000)",
-                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000)",
-                    "('"+child.toString()+"', header=true, normalize_names=true,  quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
+                    "('"+csvPath+"', "+csvOptions+", sample_size=2048000)",
+                    "('"+csvPath+"', "+csvOptions+", quote='\"', escape='\"', sample_size=2048000)",
+                    "('"+csvPath+"', "+csvOptions+", quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
             };
 
             boolean anyWorked=false;
@@ -414,7 +441,13 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             PreparedStatement columnsStatement = connection.prepareStatement(columnsStatementQuery)
             columnsStatement.setString(1, tableName)
 
-            List<Map<String, Object>> columnResults = Util.resultSetToList(columnsStatement.executeQuery())
+            List<Map<String, Object>> columnResults = Util.resultSetToList(columnsStatement.executeQuery()).findAll { Map column ->
+                includedBy(column.column_name as String, params.includeColumnsLike) && !matchesAny(column.column_name as String, params.excludeColumnsLike)
+            }
+            if (columnResults.isEmpty()) {
+                connection.prepareStatement("DROP TABLE IF EXISTS \"${tableName}\"").execute()
+                continue
+            }
 
 
             // Import DataTypes to the top-level DataModel
@@ -443,17 +476,21 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             columnResults.each {columnMap ->
                 DataElement dataElement = new DataElement(label: Util.sanitiseForMauroLabel(Util.normaliseLabelCase((String) columnMap.column_name)), minMultiplicity: columnMap.is_nullable ? 0 : 1, maxMultiplicity: 1, dataType: dataTypeMap[columnMap.data_type], description: columnMap.comment, order: ((String) columnMap.ordinal_position).toInteger())
 
-                addDuckResultsAsMetadata(dataElement, columnMap);
+                addDuckResultsAsMetadata(dataElement, columnMap, params);
+                addMetadata(dataElement.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: "${sourceRoot == null ? filename : sourceRoot.relativize(child).toString()}/${columnMap.column_name}"))
+                addMetadata(dataElement.metadata, new Metadata(namespace: namespace(params), key: 'duckdbColumnName', value: columnMap.column_name))
 
                 dataClass.dataElements << dataElement
 
                 log.info "table: [${columnMap.table_name}], column: [${columnMap.column_name}]"
             }
 
-            importDuckRowCounts(dataClass, tableName,  connection);
-            importDuckEnumerationValues(dataModel,dataClass, tableName, connection);
-            importDuckSummaryMetadataForEnumerations(dataClass,tableName,connection);
-            importDuckSummaryMetadataForDatesAndNumbers(dataClass,tableName,connection);
+            importDuckRowCounts(dataClass, tableName, connection, namespace(params));
+            if (params.detectEnumerations != false) importDuckEnumerationValues(dataModel,dataClass, tableName, connection, params);
+            if (params.generateSummaryMetadata != false) {
+                importDuckSummaryMetadataForEnumerations(dataClass,tableName,connection);
+                importDuckSummaryMetadataForDatesAndNumbers(dataClass,tableName,connection);
+            }
 
             // Make sure every element has a suggestion score for the explorer, if it hasn't been
             for(DataElement dataElement : dataClass.dataElements)
@@ -529,7 +566,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             final String filename=child.getFileName().toString()
             final String folderName=Util.normaliseLabelCase(removeFileNameSuffixes( filename  ))
 
+            boolean schemaDirectory = sourceRoot != null && child.getParent() == sourceRoot
+            if (schemaDirectory && (!includedBy(folderName, params.includeSchemas) || matchesAny(folderName, params.excludeSchemas))) continue
             final DataClass dataClass = new DataClass(label: Util.sanitiseForMauroLabel(folderName))
+            addMetadata(dataClass.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot == null ? filename : sourceRoot.relativize(child).toString()))
             addClass(parent,dataClass)
 
             final File[] files=child.toFile().listFiles();
@@ -538,7 +578,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             {
                 myChildren.add(files[p].toPath())
             }
-            recurseDirectory(dataClass, myChildren, dataModel, connection)
+            recurseDirectory(dataClass, myChildren, dataModel, connection, params, rootModel, rootName, sourceRoot)
         }
     }
 
@@ -553,6 +593,41 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
     private static String[] archiveSuffixes=new String[]
     {
             ".zip"
+    }
+
+    static String namespace(CSVImportParams params) {
+        params.metadataNamespace?.trim() ? params.metadataNamespace.trim() : NAMESPACE_ME
+    }
+
+    static String toDuckList(List<String> values) {
+        '[' + values.collect { "'${it.replace("'", "''")}'" }.join(', ') + ']'
+    }
+
+    /** SQL LIKE semantics: percent matches any sequence and underscore matches one character. */
+    static boolean matchesAny(String identifier, List<String> patterns) {
+        if (!patterns) return false
+        patterns.any { String pattern ->
+            StringBuilder regex = new StringBuilder('(?is)^')
+            pattern.toCharArray().each { char ch ->
+                if (ch == '%') regex.append('.*')
+                else if (ch == '_') regex.append('.')
+                else regex.append(java.util.regex.Pattern.quote(String.valueOf(ch)))
+            }
+            regex.append('$')
+            identifier ==~ regex.toString()
+        }
+    }
+
+    static boolean includedBy(String identifier, List<String> patterns) {
+        !patterns || matchesAny(identifier, patterns)
+    }
+
+    static String sourceColumn(DataElement element) {
+        element.metadata.find { it.key == 'duckdbColumnName' }?.value?.toString() ?: element.label
+    }
+
+    static String quotedIdentifier(String identifier) {
+        '"' + identifier.replace('"', '""') + '"'
     }
 
     private static boolean hasSuffix(final String fileName, final String[] suffixes)
@@ -603,17 +678,22 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         CSVImportParams
     }
 
-    static void importDuckRowCounts(final DataClass dataClass, final String tableName, final Connection connection)
+    static void importDuckRowCounts(final DataClass dataClass, final String tableName, final Connection connection, String namespace = NAMESPACE_ME)
     {
         final String countAll="count(*) __count_all";
-        final String countDistinct=dataClass.dataElements.collect {"count(distinct \"${it.label}\") \"${it.label.toLowerCase()}\""}.join(', ')+"\n";
-        final String countMinMax=dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.collect {"min(\"${it.label}\") \"${it.label.toLowerCase() + '_min'}\", max(\"${it.label}\") \"${it.label.toLowerCase() + '_max'}\""}.join(', ')+"\n";
-        final String countMaxLen=dataClass.dataElements.findAll {Util.isString(it) }.collect {"max(len(\"${it.label}\")) \"${it.label.toLowerCase() + '_max_len'}\" "}.join(', ')+"\n";
+        final String countDistinct=dataClass.dataElements.collect {
+            String col = quotedIdentifier(sourceColumn(it))
+            String validValueFilter = "${col} IS NOT NULL ${Util.isString(it) ? "AND ${col} <> '' AND ${col} <> '<null>' AND ${col} <> '<no data>' AND ${col} <> '<blank>'" : ''} ${Util.isNumeric(it) ? "AND ${col} <> 0" : ''}"
+            "count(distinct ${col}) FILTER (WHERE ${validValueFilter}) ${quotedIdentifier(it.label.toLowerCase())}"
+        }.join(', ')+"\n";
+        final String countMinMax=dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.collect {"min(${quotedIdentifier(sourceColumn(it))}) ${quotedIdentifier(it.label.toLowerCase() + '_min')}, max(${quotedIdentifier(sourceColumn(it))}) ${quotedIdentifier(it.label.toLowerCase() + '_max')}"}.join(', ')+"\n";
+        final String countMaxLen=dataClass.dataElements.findAll {Util.isString(it) }.collect {"max(len(${quotedIdentifier(sourceColumn(it))})) ${quotedIdentifier(it.label.toLowerCase() + '_max_len')} "}.join(', ')+"\n";
         final String countNotNull=dataClass.dataElements.collect{
-            "count(\"${it.label}\") FILTER (WHERE \"${it.label}\" IS NOT NULL "+
-                    "${Util.isString(it)?" AND \"${it.label}\" <> '' AND \"${it.label}\" <> '<null>' AND \"${it.label}\" <> '<no data>' AND \"${it.label}\" <> '<blank>' ":""}"+
-                    "${Util.isNumeric(it)?" AND \"${it.label}\" <> 0 ":""}"+
-                    ") \"${it.label.toLowerCase() + '_not_null'}\""
+            String col = quotedIdentifier(sourceColumn(it))
+            "count(${col}) FILTER (WHERE ${col} IS NOT NULL "+
+                    "${Util.isString(it)?" AND ${col} <> '' AND ${col} <> '<null>' AND ${col} <> '<no data>' AND ${col} <> '<blank>' ":""}"+
+                    "${Util.isNumeric(it)?" AND ${col} <> 0 ":""}"+
+                    ") ${quotedIdentifier(it.label.toLowerCase() + '_not_null')}"
         }.join(', ')+"\n";
 
         String query ='select \n' + [countAll,countDistinct,countMinMax,countMaxLen,countNotNull].findAll{!it.trim().isEmpty()}.join(" ,\n") + "\nfrom \"${tableName}\"";
@@ -624,9 +704,9 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         Map<String, Object> counts = Util.resultSetToList(countsStatement.executeQuery()).first()
 
 
-        addMetadata(dataClass.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'row_count', value: counts['__count_all']))
+        addMetadata(dataClass.metadata,new Metadata(namespace: namespace, key: 'row_count', value: counts['__count_all']))
         dataClass.dataElements.each {DataElement dataElement ->
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'distinct_values_count', value: counts[dataElement.label.toLowerCase()]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: namespace, key: 'distinct_values_count', value: counts[dataElement.label.toLowerCase()]))
             addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'distinctValuesCount', value: counts[dataElement.label.toLowerCase()] ))
             addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'rowCount', value: counts['__count_all'] ))
             addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_EXPLORER, key: 'notNullValuesCount', value: counts[ (dataElement.label.toLowerCase() + '_not_null') ] ))
@@ -634,8 +714,8 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
         }
         dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}.each {DataElement dataElement ->
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: namespace, key: 'min_value', value: counts[(dataElement.label.toLowerCase() + '_min') ]))
+            addMetadata(dataElement.metadata,new Metadata(namespace: namespace, key: 'max_value', value: counts[(dataElement.label.toLowerCase() + '_max') ]))
         }
         dataClass.dataElements.findAll {Util.isString(it) }.each {DataElement dataElement ->
             Object max_len=counts[(dataElement.label.toLowerCase() + '_max_len') ];
@@ -643,11 +723,11 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             {
                 max_len=0L;
             }
-            addMetadata(dataElement.metadata,new Metadata(namespace: NAMESPACE_ME, key: 'max_string_length', value: max_len))
+            addMetadata(dataElement.metadata,new Metadata(namespace: namespace, key: 'max_string_length', value: max_len))
         }
     }
 
-    static void importDuckEnumerationValues(final DataModel dataModel, final DataClass dataClass, final String tableName, final Connection connection)
+    static void importDuckEnumerationValues(final DataModel dataModel, final DataClass dataClass, final String tableName, final Connection connection, CSVImportParams params = new CSVImportParams())
     {
         // Values can be enumerated if the number of distinct values is less than or equals to Util.MAX_ENUMERATION_VALUES
         // and for VARCHAR, the maximum length is less than or equals to Util.MAX_ENUMERATION_VALUE_LENGTH
@@ -663,18 +743,32 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         for(DataElement column : dataClass.dataElements)
         {
             boolean isEnumerationColumn = false
+            boolean excludedFromEnumeration = (params.enumIgnoreColumn ?: []).any { column.label.equalsIgnoreCase(it) } ||
+                (params.enumIgnoreColumnLike ?: []).any { column.label.toLowerCase().contains(it.toLowerCase()) }
             final Metadata distinctValuesMetadata = column.metadata.find {it.key == 'distinct_values_count'}
             final Metadata notNullValuesCountMetadata = column.metadata.find {it.key == 'notNullValuesCount'}
 
-            if (notNullValuesCountMetadata != null && distinctValuesMetadata != null) {
+            if ((params.enumGivenAdornment ?: []).any { column.label.toLowerCase().endsWith(it.toLowerCase()) } ||
+                (params.enumLookupAdornment ?: []).any { column.label.toLowerCase().endsWith(it.toLowerCase()) }) isEnumerationColumn = true
+
+            if (!isEnumerationColumn && !excludedFromEnumeration && distinctValuesMetadata != null && distinctValuesMetadata.value.toLong() <= (params.maxEnumerations ?: 80)) isEnumerationColumn = true
+            if (excludedFromEnumeration) isEnumerationColumn = false
+            if (isEnumerationColumn && notNullValuesCountMetadata != null && distinctValuesMetadata != null) {
                 final long notNullValuesCount = notNullValuesCountMetadata.value.toLong()
-                long distinctValuesIncludingNull = distinctValuesMetadata.value.toLong()+1
+                long distinctValues = distinctValuesMetadata.value.toLong()
 
                 if (notNullValuesCount == 0) {
+                    isEnumerationColumn = false
                     log.warn('excluding {}.{} as enumeration, column is all null', dataClass.label, column.label)
-                } else if (distinctValuesIncludingNull/notNullValuesCount < 0.1 && distinctValuesIncludingNull < Util.MAX_ENUMERATION_VALUES) {
-                    isEnumerationColumn = true
+                    addMetadata(column.metadata, new Metadata(namespace: NAMESPACE_EXPLORER, key: 'allNull', value: true))
+                } else if (notNullValuesCount < 3 * distinctValues) {
+                    isEnumerationColumn = false
                     log.warn('excluding {}.{} as enumeration, values are too distinct', dataClass.label, column.label)
+                } else {
+                    Metadata rowCountMetadata = column.metadata.find { it.namespace == NAMESPACE_EXPLORER && it.key == 'rowCount' }
+                    if (rowCountMetadata != null && notNullValuesCount / (double) rowCountMetadata.value.toLong() < 0.33d * (distinctValues / (double) (distinctValues + 1))) {
+                        addMetadata(column.metadata, new Metadata(namespace: NAMESPACE_EXPLORER, key: 'mostlyNull', value: true))
+                    }
                 }
             }
 
@@ -687,7 +781,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     if (maxStringLengthObject != null) {
                         long maxStringLength = maxStringLengthObject.toLong()
 
-                        if (maxStringLength > Util.MAX_ENUMERATION_VALUE_LENGTH) {
+                        if (maxStringLength > 100) {
                             isEnumerationColumn = false
                             log.info(column.label + " has a maximum string length greater than " + Util.MAX_ENUMERATION_VALUE_LENGTH);
                         }
@@ -701,7 +795,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             }
 
             // Only strings, numbers, or date types
-            if(!Util.isString(column) && !Util.isInteger(column) && !Util.isDate(column)){
+            if(!Util.isString(column) && !Util.isNumeric(column) && !Util.isDate(column)){
                 isEnumerationColumn = false
                 log.info(column.label+" is not a string, int nor date: "+column.dataType.label)
             }
@@ -723,7 +817,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         List<String> subqueries=new ArrayList<>(enumerationColumns.size());
         for(DataElement column : enumerationColumns)
         {
-            subqueries.add("histogram(\"${column.label}\") \"${column.label.toLowerCase()}\"");
+            subqueries.add("histogram(${quotedIdentifier(sourceColumn(column))}) ${quotedIdentifier(column.label.toLowerCase())}");
         }
 
         String query = 'select ' + subqueries.join(', ') + ' from \"'+tableName+'\"'
@@ -744,6 +838,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             Map<Object,Object> valueMap=(Map<Object,Object>) enumerationValuesMaps[column.label.toLowerCase()];
             if(valueMap==null)
             {
+                continue
+            }
+            if (valueMap.size() > 20000) {
+                log.warn('Skipping enumeration {}.{} because it exceeds the SQL importer maximum value count', dataClass.label, column.label)
                 continue
             }
 
@@ -826,7 +924,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             String reportValue=reportValueObject.toString();
 
-            SummaryMetadata summaryMetadata = new SummaryMetadata(label: Util.sanitiseForMauroLabel(it.label), summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
+            SummaryMetadata summaryMetadata = new SummaryMetadata(label: it.label, summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
             summaryMetadata.summaryMetadataReports << new SummaryMetadataReport(reportValue: reportValue, reportDate: Instant.now())
             it.summaryMetadata << summaryMetadata
             dataClass.summaryMetadata << summaryMetadata
@@ -842,6 +940,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         List<DataElement> dateAndNumericElements = dataClass.dataElements.findAll {Util.isDate(it) || Util.isNumeric(it)}
 
         List<String> histogramSelects = dateAndNumericElements.collect { DataElement dataElement ->
+            String columnSql = quotedIdentifier(sourceColumn(dataElement))
             if (Util.isDate(dataElement)) {
 
                 Metadata minMetadata=dataElement.metadata.find {it.key == 'min_value'}
@@ -857,56 +956,29 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                             LocalDate maxDate = Util.parseISO_LOCAL_DATE(maxValue);
                             long days = ChronoUnit.DAYS.between(minDate, maxDate)
 
-                            if (days > 7000) {
-                                // group by decades
-                                long binInterval = 10L;
-                                """\
-                            (
-                                SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
-                                FROM
-                                (
-                                    SELECT concat(binStart,'-',binStart+${binInterval - 1}) keyName , count
-                                    FROM
-                                    (
-                                        SELECT binStart, count(*) count
-                                        FROM
-                                        (
-                                            SELECT CAST( floor(extract('year' from "${dataElement.label}")/${binInterval})*${binInterval} AS INT) AS binStart
-                                            FROM "$tableName"
-                                            WHERE binStart IS NOT NULL
-                                            ORDER BY binStart
-                                        )
-                                        GROUP BY binStart
-                                        ORDER BY binStart
-                                    )
-                                )
-                                ) "${dataElement.label.toLowerCase()}"
-                            """
+                            String keyExpression
+                            if (days > 70000) {
+                                keyExpression = "concat(CAST(CAST(floor(extract('year' from ${columnSql}) / 100) * 100 AS INTEGER) AS VARCHAR), '-', CAST(CAST(floor(extract('year' from ${columnSql}) / 100) * 100 + 99 AS INTEGER) AS VARCHAR))"
+                            } else if (days > 7000) {
+                                keyExpression = "concat(CAST(CAST(floor(extract('year' from ${columnSql}) / 10) * 10 AS INTEGER) AS VARCHAR), '-', CAST(CAST(floor(extract('year' from ${columnSql}) / 10) * 10 + 9 AS INTEGER) AS VARCHAR))"
+                            } else if (days > 700) {
+                                keyExpression = "CAST(extract('year' from ${columnSql}) AS VARCHAR)"
+                            } else if (days > 70) {
+                                keyExpression = "strftime(${columnSql}, '%Y-%m')"
                             } else {
-                                // group by years
-                                """\
-                            (
-                                SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
-                                FROM
-                                (
-                                    SELECT binStart keyName , count
-                                    FROM
-                                    (
-                                        SELECT binStart, count(*) count
-                                        FROM
-                                        (
-                                            SELECT extract('year' from "${dataElement.label}") AS binStart
-                                            FROM "$tableName"
-                                            WHERE binStart IS NOT NULL
-                                            ORDER BY binStart
-                                        )
-                                        GROUP BY binStart
-                                        ORDER BY binStart
-                                    )
-                                )
-                                ) "${dataElement.label.toLowerCase()}"
-                            """
+                                keyExpression = "strftime(${columnSql}, '%Y-%m-%d')"
                             }
+                            """\
+                            (
+                              SELECT CAST(to_json(map_from_entries(array_agg(row(keyName, valueCount) ORDER BY keyName))) AS VARCHAR)
+                              FROM (
+                                SELECT $keyExpression AS keyName, count(*) AS valueCount
+                                FROM "$tableName"
+                                WHERE ${columnSql} IS NOT NULL
+                                GROUP BY keyName
+                              )
+                            ) "${dataElement.label.toLowerCase()}"
+                            """
                         }
                         catch (DateTimeParseException dtpe) {
                             log.error("Histogram. Date parse error in " + tableName + "." + dataElement.label);
@@ -931,7 +1003,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                         final long minLong = Long.parseLong(minValue, 10);
                         final long maxLong = Long.parseLong(maxValue, 10);
 
-                        final long interval = maxLong - maxLong;
+                        final long interval = maxLong - minLong;
 
                         long distinctValuesCountLong;
                         if (distinctValuesCount) {
@@ -955,18 +1027,19 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                         // The SQL needs to convert the value to a bin: lowestBinValue + (floor(value / binInterval) * binInterval)
                         // The interval is binStart to binStart + binInterval -1
 
+                        String binLabelExpression = binInterval == 1 ? 'CAST(binStart AS VARCHAR)' : "concat(binStart,'-',binStart+${binInterval - 1})"
                         """\
                     (
-                    SELECT CAST(to_json(map_from_entries(list_sort(array_agg(row(keyName,count))))) AS VARCHAR) 
+                    SELECT CAST(to_json(map_from_entries(array_agg(row(keyName,count) ORDER BY binStart))) AS VARCHAR)
                     FROM
                     (
-                        SELECT concat(binStart,'-',binStart+${binInterval - 1}) keyName , count
+                        SELECT binStart, ${binLabelExpression} keyName , count
                         FROM
                         (
                             SELECT binStart, count(*) count
                             FROM
                             (
-                                SELECT $lowestBinValue + CAST(floor(("${dataElement.label}" - $lowestBinValue)/$binInterval)*$binInterval AS BIGINT) AS binStart
+                                SELECT $lowestBinValue + CAST(floor((${columnSql} - $lowestBinValue)/$binInterval)*$binInterval AS BIGINT) AS binStart
                                 FROM "$tableName"
                                 WHERE binStart IS NOT NULL
                                 ORDER BY binStart
@@ -998,7 +1071,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         dateAndNumericElements.findAll {histogramJson[it.label.toLowerCase()]}.each {
             Object reportValueObject=histogramJson[it.label.toLowerCase()]
             String reportValue=reportValueObject.toString();
-            SummaryMetadata summaryMetadata = new SummaryMetadata(label: Util.sanitiseForMauroLabel(it.label), summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
+            SummaryMetadata summaryMetadata = new SummaryMetadata(label: it.label, summaryMetadataType: SummaryMetadataType.MAP, summaryMetadataReports: [])
             summaryMetadata.summaryMetadataReports << new SummaryMetadataReport(reportValue: reportValue, reportDate: Instant.now())
             it.summaryMetadata << summaryMetadata
             dataClass.summaryMetadata << summaryMetadata
@@ -1010,10 +1083,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
         }
     }
 
-    private static AdministeredItem addDuckResultsAsMetadata(AdministeredItem item, Map<String, Object> results) {
+    private static AdministeredItem addDuckResultsAsMetadata(AdministeredItem item, Map<String, Object> results, CSVImportParams params) {
         results.findAll {it.key && it.value}.each {
             if (it.key != 'table_catalog' && it.key != 'table_schema') {
-                addMetadata(item.metadata,new Metadata(namespace: NAMESPACE_ME, key: Util.sanitiseForMauroLabel(it.key), value: it.value))
+                addMetadata(item.metadata,new Metadata(namespace: namespace(params), key: Util.sanitiseForMauroLabel(it.key), value: it.value))
             }
         }
         item

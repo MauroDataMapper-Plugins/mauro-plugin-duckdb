@@ -20,6 +20,37 @@ Example using gradlew:
 ./gradlew run --args='-s csv_directory -o csv_datamodel.json'
 ```
 
+### CSV catalogue fixtures
+
+Checked-in CSV trees under `src/test/resources/csv-catalogues` mirror representative Oracle and SQL Server test schemas and include nested-directory, quoted-value, and headerless TSV cases. The CLI tests import these directories directly.
+
+Try the SQL Server shaped catalogue with table and column selection:
+
+```bash
+./gradlew run --args='-s src/test/resources/csv-catalogues/sqlserver/metadata_simple --included-tables organisation --included-columns org_type -o /tmp/organisation.json'
+```
+
+Try the multi-model VersionedFolder fixture with explicit headers for the headerless TSV:
+
+```bash
+./gradlew run --args='-s src/test/resources/csv-catalogues/edge_cases --output-structure VERSIONED_FOLDER --included-tables headerless --no-first-row-is-header --headers code,value -o /tmp/edge-catalogue.json'
+```
+
+### Standalone command-line jar
+
+Build a single jar containing the CLI and its runtime dependencies:
+
+```bash
+./gradlew clean shadowJar
+```
+
+The artifact is written to `build/libs/mauro-plugin-duckdb-cli-<version>-standalone.jar`. Copy that jar to the target machine and run it with Java 17 or later; the target machine does not need Gradle or network access:
+
+```bash
+java -jar mauro-plugin-duckdb-cli-<version>-standalone.jar --help
+java -jar mauro-plugin-duckdb-cli-<version>-standalone.jar --source extracts -o catalogue.json
+```
+
 ---
 
 ### Micronaut 4.5.0 Documentation

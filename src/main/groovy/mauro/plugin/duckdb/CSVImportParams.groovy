@@ -4,6 +4,42 @@ import org.maurodata.plugin.importer.config.ImportGroupConfig
 import org.maurodata.plugin.importer.config.ImportParameterConfig
 
 class CSVImportParams extends DuckDBImportParams {
+    @ImportParameterConfig(displayName = 'Output structure', description = 'Import the source as one DataModel or as a VersionedFolder whose immediate child directories are DataModels.', order = 1, group = @ImportGroupConfig(name = 'Output', order = 1))
+    String outputStructure = 'DATA_MODEL'
+
+    @ImportParameterConfig(displayName = 'DuckDB metadata namespace', description = 'Namespace used for metadata produced by DuckDB. Defaults to the stable DuckDB namespace.', order = 2, optional = true, group = @ImportGroupConfig(name = 'Metadata', order = 2))
+    String metadataNamespace
+
+    @ImportParameterConfig(displayName = 'Included schemas', description = 'Import only schema-like directory names matching these SQL LIKE patterns.', order = 1, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> includeSchemas = []
+
+    @ImportParameterConfig(displayName = 'Excluded schemas', description = 'Exclude schema-like directory names matching these SQL LIKE patterns.', order = 2, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> excludeSchemas = []
+
+    @ImportParameterConfig(displayName = 'Included tables', description = 'Import only CSV table names matching these SQL LIKE patterns.', order = 3, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> includeTablesLike = []
+
+    @ImportParameterConfig(displayName = 'Excluded tables', description = 'Exclude CSV table names matching these SQL LIKE patterns.', order = 4, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> excludeTablesLike = []
+
+    @ImportParameterConfig(displayName = 'Included columns', description = 'Import only column names matching these SQL LIKE patterns.', order = 5, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> includeColumnsLike = []
+
+    @ImportParameterConfig(displayName = 'Excluded columns', description = 'Exclude column names matching these SQL LIKE patterns.', order = 6, optional = true, group = @ImportGroupConfig(name = 'Selection', order = 3))
+    List<String> excludeColumnsLike = []
+
+    @ImportParameterConfig(displayName = 'Enumeration given adornments', description = 'Column-name suffixes that mark columns as enumerations, like _IND or _TZ.', order = 1, optional = true, group = @ImportGroupConfig(name = 'Enumeration', order = 4))
+    List<String> enumGivenAdornment = []
+
+    @ImportParameterConfig(displayName = 'Enumeration lookup adornments', description = 'Column-name suffixes that mark code columns as enumerations.', order = 2, optional = true, group = @ImportGroupConfig(name = 'Enumeration', order = 4))
+    List<String> enumLookupAdornment = []
+
+    @ImportParameterConfig(displayName = 'Enumeration ignore columns', description = 'Exact column names to exclude from enumeration detection.', order = 3, optional = true, group = @ImportGroupConfig(name = 'Enumeration', order = 4))
+    List<String> enumIgnoreColumn = []
+
+    @ImportParameterConfig(displayName = 'Enumeration ignore columns like', description = 'Column-name fragments to exclude from enumeration detection.', order = 4, optional = true, group = @ImportGroupConfig(name = 'Enumeration', order = 4))
+    List<String> enumIgnoreColumnLike = []
+
     @ImportParameterConfig(
             displayName = 'Detect Types',
             description = 'Whether to detect appropriate types from the values in each column',
