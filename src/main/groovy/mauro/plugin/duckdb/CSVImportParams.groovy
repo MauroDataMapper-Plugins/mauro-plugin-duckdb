@@ -2,8 +2,15 @@ package mauro.plugin.duckdb
 
 import org.maurodata.plugin.importer.config.ImportGroupConfig
 import org.maurodata.plugin.importer.config.ImportParameterConfig
+import java.nio.file.Path
 
 class CSVImportParams extends DuckDBImportParams {
+    Path tempDirectory
+    CSVRunSummary runSummary
+
+    @ImportParameterConfig(displayName = 'Ignore CSV errors', description = 'Allow DuckDB to skip malformed CSV rows after strict parsing attempts fail.', order = 7, optional = true, group = @ImportGroupConfig(name = 'Configuration', order = 2))
+    Boolean ignoreCsvErrors = false
+
     @ImportParameterConfig(displayName = 'Output structure', description = 'Import the source as one DataModel or as a VersionedFolder whose immediate child directories are DataModels.', order = 1, group = @ImportGroupConfig(name = 'Output', order = 1))
     String outputStructure = 'DATA_MODEL'
 

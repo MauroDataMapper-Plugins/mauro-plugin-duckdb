@@ -98,8 +98,7 @@ class CSVImportConfigurationSpec extends Specification {
             excludeSchemas: ['Two'], excludeTablesLike: ['peo%']))
 
         then:
-        excluded.first().dataClasses*.label == ['One']
-        !allClasses(excluded.first())*.label.any { it in ['People', 'Codes'] }
+        excluded == []
 
         when: 'column excludes leave the other source columns in place'
         def columnExcluded = importer.importDomain(new CSVImportParams(
@@ -108,6 +107,62 @@ class CSVImportConfigurationSpec extends Specification {
 
         then:
         allClasses(columnExcluded.first()).find { it.label == 'Codes' }.dataElements*.label == ['Label']
+    }
+
+    def "empty and filtered directories are pruned and temp files stay under the requested directory"() {
+        given:
+        def root = Files.createTempDirectory('csv-pruned-tree')
+        def temp = root.resolve('work-area')
+        def included = Files.createDirectories(root.resolve('Included'))
+        Files.createDirectories(root.resolve('Empty'))
+        Files.createDirectories(root.resolve('Excluded'))
+        Files.writeString(included.resolve('readable.csv'), 'id,value\n1,ok\n')
+        Files.writeString(root.resolve('Excluded/filtered.csv'), 'id,value\n2,no\n')
+
+        when:
+        def models = new CSVDataModelImporter().importDomain(new CSVImportParams(
+            importFile: new FileParameter(root.toString(), '', new byte[0]),
+            tempDirectory: temp,
+            includeSchemas: ['Included']))
+
+        then:
+        models.size() == 1
+        models.first().dataClasses*.label == ['Included']
+        allClasses(models.first())*.label.contains('Readable')
+        Files.isDirectory(temp)
+        Files.list(temp).toList().isEmpty()
+    }
+
+    def "VersionedFolder omits immediate directories with no included tables"() {
+        given:
+        def root = Files.createTempDirectory('csv-empty-versioned')
+        def populated = Files.createDirectories(root.resolve('Populated/Schema'))
+        Files.createDirectories(root.resolve('NoTables/Schema'))
+        Files.writeString(populated.resolve('included.csv'), 'id,value\n1,ok\n')
+        Files.writeString(populated.resolve('excluded.csv'), 'id,value\n2,no\n')
+
+        when:
+        def models = new CSVDataModelImporter().importDomain(new CSVImportParams(
+            importFile: new FileParameter(root.toString(), '', new byte[0]),
+            outputStructure: 'VERSIONED_FOLDER',
+            includeTablesLike: ['included']))
+
+        then:
+        models*.label == ['Populated']
+    }
+
+    def "ignore-errors CSV parser fallback is only present when enabled"() {
+        when:
+        def strict = CSVDataModelImporter.csvReadSniffs('/extract.csv', 'header=true, auto_detect=true', false)
+        def lenient = CSVDataModelImporter.csvReadSniffs('/extract.csv', 'header=true, auto_detect=true', true)
+
+        then:
+        strict.size() == 2
+        strict.every { !it.contains('ignore_errors=true') }
+        lenient.size() == 3
+        lenient.take(2) == strict
+        lenient.last() == "('/extract.csv', header=true, auto_detect=true, quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
+        !new CSVImportParams().ignoreCsvErrors
     }
 
     def "SQL fixture shaped extracts produce enumeration and numeric/date map summaries"() {

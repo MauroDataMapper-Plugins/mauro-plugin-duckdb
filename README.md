@@ -1,12 +1,14 @@
 ## Usage
 
 ```
-Usage: mauro-plugin-duckdb-csv [-hV] [--[no-]detect-enumerations]
-       [--[no-]detect-types] [--[no-]first-row-is-header]
-       [--[no-]generate-summary-metadata] [--headers=<headers>]
-       [-m=<modelName>] [--max-enumerations=<maxEnumerations>]
+Usage: mauro-plugin-duckdb-csv [-hV] [--ignore-csv-errors] [--quiet] [--summary]
+       [--[no-]detect-enumerations] [--[no-]detect-types]
+       [--[no-]first-row-is-header] [--[no-]generate-summary-metadata]
+       [--headers=<headers>] [--log-file=<logFile>] [-m=<modelName>]
+       [--max-enumerations=<maxEnumerations>]
        [--metadata-namespace=<metadataNamespace>] -o=<output>
        [--output-structure=<outputStructure>] -s=<sourceFile>
+       [--temp=<tempDirectory>]
        [--enum-given-adornment=<enumGivenAdornment>[,<enumGivenAdornment>...]]...
        [--enum-ignore-column=<enumIgnoreColumn>[,<enumIgnoreColumn>...]]...
        [--enum-ignore-column-like=<enumIgnoreColumnLike>[,<enumIgnoreColumnLike>...]]...
@@ -25,6 +27,10 @@ Catalogue CSV, TSV, PSV, or TAB extracts as Mauro data models.
                               --no-detect-enumerations to disable).
       --[no-]detect-types   Infer column types from CSV values (use
                               --no-detect-types to import values as strings).
+      --quiet               Suppress console log messages; file logging is
+                              unaffected.
+      --summary             Print an output summary, including when --quiet is
+                              set.
       --enum-given-adornment=<enumGivenAdornment>[,<enumGivenAdornment>...]
                             Column suffixes that identify enumerations, e.g.
                               _IND.
@@ -53,6 +59,8 @@ Catalogue CSV, TSV, PSV, or TAB extracts as Mauro data models.
       --[no-]generate-summary-metadata
                             Generate value distribution summaries (use
                               --no-generate-summary-metadata to disable).
+      --ignore-csv-errors   Allow DuckDB to skip malformed rows after strict
+                              CSV parsing attempts fail; emits a warning.
   -h, --help                Show this help message and exit.
       --headers=<headers>   Comma-separated replacement headers, used when the
                               first row is not a header.
@@ -65,6 +73,7 @@ Catalogue CSV, TSV, PSV, or TAB extracts as Mauro data models.
       --included-tables=<includeTablesLike>[,<includeTablesLike>...]
                             Include CSV table names matching SQL LIKE
                               pattern(s), using % and _ wildcards.
+      --log-file=<logFile>  Append run logs to this file.
   -m, --model-name=<modelName>
                             Override the generated DataModel or VersionedFolder
                               label.
@@ -81,6 +90,9 @@ Catalogue CSV, TSV, PSV, or TAB extracts as Mauro data models.
                               become DataModels).
   -s, --source=<sourceFile> Input CSV/TSV/PSV/TAB file, ZIP archive, or
                               directory tree.
+      --temp=<tempDirectory>
+                            Directory for all temporary and transitional files;
+                              created if needed.
   -V, --version             Print version information and exit.
 ```
 

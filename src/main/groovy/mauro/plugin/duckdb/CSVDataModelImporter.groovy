@@ -30,6 +30,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -44,8 +45,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
     @Override
     List<DataModel> importDomain(CSVImportParams params) {
 
-        final ArrayList<File> filesToCleanUp = new ArrayList<>(10);
         Connection connection=null;
+        File workDir = null
+        Thread cleanupHook = null
+        Runnable cleanupWorkspace = null
         DataModel dataModel=null;
         List<DataModel> importedModels = []
 
@@ -86,6 +89,17 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             if (params.outputStructure?.equalsIgnoreCase('VERSIONED_FOLDER') && !fileParameterPointsTo.isDirectory()) {
                 throw new IllegalArgumentException('VERSIONED_FOLDER output requires a directory source')
             }
+
+            Path tempRoot = params.tempDirectory ?: Path.of(System.getProperty('java.io.tmpdir'))
+            Files.createDirectories(tempRoot)
+            workDir = Files.createTempDirectory(tempRoot, 'mauro-duckdb-').toFile()
+            Path workspacePath = workDir.toPath()
+            AtomicBoolean cleanupStarted = new AtomicBoolean()
+            cleanupWorkspace = {
+                if (cleanupStarted.compareAndSet(false, true)) deleteRecursively(workspacePath, params)
+            } as Runnable
+            cleanupHook = new Thread(cleanupWorkspace, 'mauro-duckdb-temp-cleanup')
+            Runtime.runtime.addShutdownHook(cleanupHook)
 
             if (fileParameterPointsTo.isFile() && !hasSuffix(fileParameterPointsTo.getName(), (dataSuffixes + archiveSuffixes))) {
                 throw new IOException("Unsupported format: " + fileParameterPointsTo.getName() + " : expecting one of: " + (dataSuffixes + archiveSuffixes).join(", "))
@@ -128,7 +142,7 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 // An archive. Will need to be unpacked
                 // Create a temp directory to unpack the files into
 
-                final File modelDir = File.createTempDir("duck_db_", "_mauro");
+                final File modelDir = Files.createTempDirectory(workDir.toPath(), "duck_db_").toFile()
 
                 log.info("Unpacking zip file to: " + modelDir.getCanonicalPath());
 
@@ -144,10 +158,12 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     }
                     if (newFile.isHidden()) {
                         log.warn('Skipping [{}], is a hidden file', zipEntry.getName())
+                        params.runSummary?.warnings?.add("Skipped hidden archive entry '${zipEntry.getName()}'.")
                         continue
                     }
                     if (!hasSuffix(zipEntry.getName(), dataSuffixes)) {
                         log.warn('Skipping [{}], is not a known data file: ' + dataSuffixes.join(", "), zipEntry.getName())
+                        params.runSummary?.warnings?.add("Skipped unsupported archive entry '${zipEntry.getName()}'.")
                         continue
                     }
 
@@ -175,9 +191,6 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     modelChildren.add(files[p].toPath())
                 }
 
-                // Remember to delete it later on
-
-                filesToCleanUp << modelDir
             }
 
             // Let's get quacking; prime the duck
@@ -197,15 +210,9 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 log.info("DuckDB using in memory database")
             } else {
                 // Set up temp dir and file for the database
-                final File tempDir = File.createTempDir("duck_db_mauro_", "");
+                final File tempDir = Files.createTempDirectory(workDir.toPath(), "duck_db_mauro_").toFile()
                 final File tempFile = File.createTempFile("duck_db_mauro_", "", tempDir);
                 log.info("DuckDB file: " + tempFile)
-                tempFile.deleteOnExit();
-                tempDir.deleteOnExit();
-
-                filesToCleanUp << tempFile
-                filesToCleanUp << tempDir
-
                 if (tempFile.exists()) {
                     tempFile.delete();
                 }
@@ -234,13 +241,14 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                     addMetadata(childModel.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot.relativize(modelPath).toString()))
                     List<Path> modelPathChildren = modelPath.toFile().listFiles()?.collect { it.toPath() } ?: []
                     recurseDirectory(childModel, new ArrayList<Path>(modelPathChildren), childModel, connection, params, childModel, modelIdentifier, modelPath)
-                    importedModels << childModel
+                    if (hasCatalogue(childModel)) importedModels << childModel
+                    else params.runSummary?.omittedModels?.add(modelIdentifier)
                 }
             } else {
                 dataModel = new DataModel(modelType: DataModelType.DATA_ASSET, label: Util.sanitiseForMauroLabel(Util.normaliseLabelCase(modelName)))
                 addMetadata(dataModel.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: fileParameterPointsTo.name))
                 recurseDirectory(dataModel, modelChildren, dataModel, connection, params, dataModel, modelName, fileParameterPointsTo.isDirectory() ? fileParameterPointsTo.toPath() : null)
-                importedModels << dataModel
+                if (hasCatalogue(dataModel)) importedModels << dataModel
             }
         }
         finally
@@ -262,36 +270,39 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             // There should be 3 files to delete:
             // A temp directory, two database files
             // Plus any directories created by unpacking zip files
-            if (filesToCleanUp.size() > 0) {
-                for (int f = 0; f < filesToCleanUp.size(); f++) {
-                    final File toDelete = filesToCleanUp.get(f);
-
-                    if (toDelete.isFile()) {
-                        log.info("X " + toDelete.getCanonicalPath())
-                        if (!toDelete.delete()) {
-                            log.warn("Failed to remove all temporary files");
-                            break
-                        }
-                    } else if (toDelete.isDirectory()) {
-                        final files = toDelete.listFiles();
-                        if (files != null && files.length > 0) {
-                            filesToCleanUp.remove(f)
-                            f--;
-                            filesToCleanUp.addAll(files)
-                            filesToCleanUp.add(toDelete)
-                        } else {
-                            log.info("X " + toDelete.getCanonicalPath())
-                            if (!toDelete.delete()) {
-                                log.warn("Failed to remove all temporary files");
-                                break
-                            }
-
-                        }
-                    }
+            if (cleanupWorkspace != null) cleanupWorkspace.run()
+            if (cleanupHook != null) {
+                try {
+                    Runtime.runtime.removeShutdownHook(cleanupHook)
+                } catch (IllegalStateException ignored) {
+                    // JVM shutdown has started; the registered hook owns cleanup.
                 }
             }
         }
         importedModels
+    }
+
+    private static boolean hasCatalogue(DataModel model) { model.dataClasses?.any { hasCatalogue(it) } ?: false }
+    private static boolean hasCatalogue(DataClass dataClass) {
+        (dataClass.dataElements && !dataClass.dataElements.isEmpty()) || (dataClass.dataClasses?.any { hasCatalogue(it) } ?: false)
+    }
+
+    private static void deleteRecursively(Path path, CSVImportParams params) {
+        if (path == null || !Files.exists(path)) return
+        def paths = Files.walk(path)
+        try {
+            paths.sorted(Comparator.reverseOrder()).forEach { Path entry ->
+                try {
+                    if (Files.deleteIfExists(entry)) log.info("X ${entry.toFile().canonicalPath}")
+                } catch (Exception exception) {
+                    String warning = "Failed to remove temporary file '${entry}': ${exception.message}"
+                    log.warn(warning)
+                    params.runSummary?.warnings?.add(warning)
+                }
+            }
+        } finally {
+            paths.close()
+        }
     }
 
     private static void addClass(final Object parent, final DataClass child)
@@ -323,16 +334,19 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
             if(!hasSuffix(filename,dataSuffixes))
             {
+                params.runSummary?.skippedFiles?.add(sourceRoot == null ? filename : sourceRoot.relativize(child).toString())
                 continue
             }
 
             final String originalTableName=removeFileNameSuffixes(filename)
-            if (!includedBy(originalTableName, params.includeTablesLike) || matchesAny(originalTableName, params.excludeTablesLike)) continue
+            if (!includedBy(originalTableName, params.includeTablesLike) || matchesAny(originalTableName, params.excludeTablesLike)) {
+                params.runSummary?.skippedFiles?.add(sourceRoot == null ? filename : sourceRoot.relativize(child).toString())
+                continue
+            }
             final String tableName=Util.sanitiseForMauroLabel(Util.normaliseLabelCase(originalTableName))
 
             final DataClass dataClass = new DataClass(label: tableName)
             addMetadata(dataClass.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot == null ? filename : sourceRoot.relativize(child).toString()))
-            addClass(parent,dataClass)
 
             // Using a large sample size to get autodetect to fail
             // If it doesn't succeed, try being more specific by setting the quotes and escape quotes
@@ -341,17 +355,13 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             String csvOptions = "header=${params.firstRowIsHeader != false}, ${params.detectTypes == false ? 'all_varchar=true' : 'auto_detect=true'}, normalize_names=false"
             if (params.headers?.trim()) csvOptions += ", names=${toDuckList(params.headers.split(',').collect { it.trim() })}"
             final String csvPath = child.toAbsolutePath().toString().replace("'", "''")
-            final String[] sniffs=new String[]
-            {
-                    "('"+csvPath+"', "+csvOptions+", sample_size=2048000)",
-                    "('"+csvPath+"', "+csvOptions+", quote='\"', escape='\"', sample_size=2048000)",
-                    "('"+csvPath+"', "+csvOptions+", quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
-            };
+            List<String> sniffs = csvReadSniffs(csvPath, csvOptions, params.ignoreCsvErrors == true)
 
             boolean anyWorked=false;
 
-            for(String sniff : sniffs)
+            for (int sniffIndex = 0; sniffIndex < sniffs.size(); sniffIndex++)
             {
+                String sniff = sniffs[sniffIndex]
                 // quote='"', escape='"',
                 final String DDL = "CREATE TABLE \"" + tableName + "\" AS SELECT * FROM read_csv"+sniff;
                 PreparedStatement readCSVStatement = null;
@@ -419,6 +429,10 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 if (worked) {
                     log.info("Created table " + tableName + " from " + child.toString())
                     anyWorked=true;
+                    if (sniffIndex == 2) {
+                        String sourceIdentifier = sourceRoot == null ? filename : sourceRoot.relativize(child).toString()
+                        params.runSummary?.csvFilesReadIgnoringErrors?.add(sourceIdentifier)
+                    }
                     break;
                 }
             }
@@ -446,8 +460,11 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             }
             if (columnResults.isEmpty()) {
                 connection.prepareStatement("DROP TABLE IF EXISTS \"${tableName}\"").execute()
+                params.runSummary?.skippedFiles?.add(sourceRoot == null ? filename : sourceRoot.relativize(child).toString())
                 continue
             }
+
+            addClass(parent, dataClass)
 
 
             // Import DataTypes to the top-level DataModel
@@ -536,7 +553,8 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             try
             {
                 log.info(drop)
-                dropped=dropStatement.execute()
+                dropStatement.execute()
+                dropped = true
             }
             catch(SQLException sqled)
             {
@@ -553,6 +571,14 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             if(!dropped)
             {
                 log.warn("Failed to drop table: "+tableName)
+                params.runSummary?.warnings?.add("DuckDB temporary table '${tableName}' could not be dropped.")
+            }
+            if (params.runSummary != null) {
+                params.runSummary.filesCatalogued++
+                params.runSummary.tablesCatalogued++
+                params.runSummary.columnsCatalogued += dataClass.dataElements.size()
+                params.runSummary.cataloguedModelIdentifiers.add(rootName)
+                params.runSummary.modelsCatalogued = params.runSummary.cataloguedModelIdentifiers.size()
             }
 
         }
@@ -570,7 +596,6 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
             if (schemaDirectory && (!includedBy(folderName, params.includeSchemas) || matchesAny(folderName, params.excludeSchemas))) continue
             final DataClass dataClass = new DataClass(label: Util.sanitiseForMauroLabel(folderName))
             addMetadata(dataClass.metadata, new Metadata(namespace: namespace(params), key: 'sourceIdentifier', value: sourceRoot == null ? filename : sourceRoot.relativize(child).toString()))
-            addClass(parent,dataClass)
 
             final File[] files=child.toFile().listFiles();
             final ArrayList<Path> myChildren=new ArrayList<>(files.length);
@@ -579,6 +604,8 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
                 myChildren.add(files[p].toPath())
             }
             recurseDirectory(dataClass, myChildren, dataModel, connection, params, rootModel, rootName, sourceRoot)
+            if (hasCatalogue(dataClass)) addClass(parent, dataClass)
+            else params.runSummary?.omittedDirectories?.add(sourceRoot == null ? filename : sourceRoot.relativize(child).toString())
         }
     }
 
@@ -601,6 +628,15 @@ class CSVDataModelImporter implements DataModelImporterPlugin<CSVImportParams> {
 
     static String toDuckList(List<String> values) {
         '[' + values.collect { "'${it.replace("'", "''")}'" }.join(', ') + ']'
+    }
+
+    static List<String> csvReadSniffs(String csvPath, String csvOptions, boolean ignoreErrors) {
+        List<String> sniffs = [
+            "('${csvPath}', ${csvOptions}, sample_size=2048000)",
+            "('${csvPath}', ${csvOptions}, quote='\"', escape='\"', sample_size=2048000)"
+        ]
+        if (ignoreErrors) sniffs << "('${csvPath}', ${csvOptions}, quote='\"', escape='\"', sample_size=2048000, ignore_errors=true)"
+        sniffs
     }
 
     /** SQL LIKE semantics: percent matches any sequence and underscore matches one character. */
