@@ -21,7 +21,7 @@ dependencies {
     implementation("io.micronaut.serde:micronaut-serde-jackson")
     compileOnly("info.picocli:picocli-codegen")
     compileOnly("io.micronaut.serde:micronaut-serde-processor")
-    runtimeOnly("ch.qos.logback:logback-classic")
+    implementation("ch.qos.logback:logback-classic")
     implementation("io.micronaut:micronaut-jackson-databind")
     implementation group: 'org.apache.groovy', name: 'groovy-json', version: '4.0.33'
     runtimeOnly("org.yaml:snakeyaml")

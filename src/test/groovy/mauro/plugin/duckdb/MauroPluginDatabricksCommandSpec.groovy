@@ -34,6 +34,144 @@ class MauroPluginDatabricksCommandSpec extends Specification {
         baos.toString().contains('--output-structure')
         baos.toString().contains('--included-tables')
         baos.toString().contains('--metadata-namespace')
+        baos.toString().contains('--temp')
+        baos.toString().contains('--log-file')
+        baos.toString().contains('--quiet')
+        baos.toString().contains('--summary')
+        baos.toString().contains('--ignore-csv-errors')
+    }
+
+    void "empty filtered run is a successful no-op and summary explains why no output was written"() {
+        given:
+        File source = new File(getClass().getResource('/csv-catalogues/sqlserver/metadata_simple').toURI())
+        def output = source.toPath().resolve('no-catalogue.json')
+        def logFile = Files.createTempFile('csv-run', '.log')
+        ByteArrayOutputStream baos = new ByteArrayOutputStream()
+        PrintStream originalOut = System.out
+        System.setOut(new PrintStream(baos))
+
+        when:
+        PicocliRunner.run(MauroPluginCSVCommand, ctx, [
+            '--source', source.absolutePath,
+            '--included-tables', 'no-such-table',
+            '--quiet',
+            '--log-file', logFile.toString(),
+            '--summary',
+            '--output', output.toString()
+        ] as String[])
+
+        then:
+        !Files.exists(output)
+        baos.toString().contains('Status: EMPTY (no catalogue written)')
+        baos.toString().contains('Files catalogued: 0')
+        !baos.toString().contains('Importing DataModel')
+        Files.readString(logFile).contains('Importing DataModel')
+        Files.readString(logFile).contains(' - X ')
+
+        cleanup:
+        System.setOut(originalOut)
+    }
+
+    void "ignore-csv-errors warns even when strict parsing succeeds"() {
+        given:
+        File source = new File(getClass().getResource('/csv-catalogues/sqlserver/metadata_simple').toURI())
+        def output = Files.createTempDirectory('csv-cli-ignore-errors').resolve('catalogue.json')
+        ByteArrayOutputStream baos = new ByteArrayOutputStream()
+        PrintStream originalOut = System.out
+        System.setOut(new PrintStream(baos))
+
+        when:
+        PicocliRunner.run(MauroPluginCSVCommand, ctx, [
+            '--source', source.absolutePath,
+            '--included-tables', 'organisation',
+            '--ignore-csv-errors',
+            '--quiet', '--summary',
+            '--output', output.toString()
+        ] as String[])
+
+        then:
+        Files.exists(output)
+        baos.toString().contains('--ignore-csv-errors is enabled')
+        baos.toString().contains('Status: COMPLETED WITH WARNINGS')
+        !baos.toString().contains('CSV read using ignore_errors=true:')
+
+        cleanup:
+        System.setOut(originalOut)
+    }
+
+    void "CLI --temp creates and uses the selected directory, then cleans its workspace"() {
+        given:
+        File source = new File(getClass().getResource('/csv-catalogues/sqlserver/metadata_simple').toURI())
+        def root = Files.createTempDirectory('csv-cli-temp-option')
+        def tempDirectory = root.resolve('chosen-temp')
+        def output = root.resolve('new-output').resolve('catalogue.json')
+        def logFile = root.resolve('catalogue.log')
+
+        when:
+        PicocliRunner.run(MauroPluginCSVCommand, ctx, [
+            '--source', source.absolutePath,
+            '--included-tables', 'organisation',
+            '--temp', tempDirectory.toString(),
+            '--log-file', logFile.toString(),
+            '--quiet',
+            '--output', output.toString()
+        ] as String[])
+
+        then:
+        Files.exists(output)
+        Files.isDirectory(output.parent)
+        Files.readString(logFile).contains(tempDirectory.toString())
+        Files.isDirectory(tempDirectory)
+        Files.list(tempDirectory).toList().isEmpty()
+    }
+
+    void "unreadable CSV fails before creating the output catalogue"() {
+        given:
+        def root = Files.createTempDirectory('csv-cli-failure')
+        def source = root.resolve('broken.csv')
+        def output = root.resolve('catalogue.json')
+        def logFile = root.resolve('catalogue.log')
+        Files.write(source, [(byte) 0xff, (byte) 0xfe, 0, 0, (byte) 0x81, (byte) 0x81] as byte[])
+        def command = new MauroPluginCSVCommand(
+            csvDataModelImporter: ctx.getBean(CSVDataModelImporter),
+            backwardsCompatibleJsonDataModelExporterPlugin: ctx.getBean(BackwardsCompatibleJsonDataModelExporterPlugin),
+            jsonFolderExporterPlugin: ctx.getBean(org.maurodata.plugin.exporter.json.JsonFolderExporterPlugin),
+            sourceFile: source.toString(), output: output,
+            firstRowIsHeader: true, logFile: logFile, quiet: true,
+            outputStructure: 'DATA_MODEL')
+
+        when:
+        command.run()
+
+        then:
+        thrown(Exception)
+        !Files.exists(output)
+        Files.readString(logFile).contains('Catalogue run failed: Failed to create table')
+    }
+
+    void "directory output target is rejected without replacing it"() {
+        given:
+        def root = Files.createTempDirectory('csv-cli-directory-output')
+        def source = root.resolve('readable.csv')
+        Files.writeString(source, 'id,value\n1,ok\n')
+        def outputDirectory = Files.createDirectory(root.resolve('catalogue.json'))
+        def tempDirectory = root.resolve('temp')
+        def command = new MauroPluginCSVCommand(
+            csvDataModelImporter: ctx.getBean(CSVDataModelImporter),
+            backwardsCompatibleJsonDataModelExporterPlugin: ctx.getBean(BackwardsCompatibleJsonDataModelExporterPlugin),
+            jsonFolderExporterPlugin: ctx.getBean(org.maurodata.plugin.exporter.json.JsonFolderExporterPlugin),
+            sourceFile: source.toString(), output: outputDirectory, tempDirectory: tempDirectory,
+            firstRowIsHeader: true, outputStructure: 'DATA_MODEL')
+
+        when:
+        command.run()
+
+        then:
+        thrown(java.io.IOException)
+        Files.isDirectory(outputDirectory)
+        Files.list(outputDirectory).toList().isEmpty()
+        Files.isDirectory(tempDirectory)
+        Files.list(tempDirectory).toList().isEmpty()
     }
 
     void "CLI imports the checked-in SQL Server fixture with include and metadata options"() {
@@ -100,14 +238,14 @@ class MauroPluginDatabricksCommandSpec extends Specification {
         json.contains('VersionedFolder')
         json.contains('"folder"')
         !json.contains('"versionedFolder"')
-        json.contains('One')
+        !json.contains('One')
         json.contains('Two')
         json.contains('Headerless')
         json.contains('Code')
         json.contains('Value')
         imported.size() == 1
         imported.first().domainType == 'VersionedFolder'
-        imported.first().dataModels*.label.containsAll(['One', 'Two'])
+        imported.first().dataModels*.label == ['Two']
         imported.first().dataModels.find { it.label == 'Two' }.dataClasses.first().dataClasses.first().dataElements*.label.containsAll(['Code', 'Value'])
     }
 }
