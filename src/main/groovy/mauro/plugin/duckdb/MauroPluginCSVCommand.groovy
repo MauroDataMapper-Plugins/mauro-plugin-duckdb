@@ -190,16 +190,16 @@ class MauroPluginCSVCommand implements Runnable {
             }
 
             Path absoluteOutput = output.toAbsolutePath().normalize()
+            Files.createDirectories(absoluteOutput.parent)
             Path stagingRoot = tempDirectory?.toAbsolutePath()?.normalize() ?: absoluteOutput.parent
             Files.createDirectories(stagingRoot)
             Path staging = Files.createTempFile(stagingRoot, absoluteOutput.fileName.toString(), '.tmp')
             try {
                 Files.write(staging, dataModelJson)
-                try {
-                    Files.move(staging, absoluteOutput, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-                } catch (IOException ignored) {
-                    Files.copy(staging, absoluteOutput, StandardCopyOption.REPLACE_EXISTING)
+                if (Files.isDirectory(absoluteOutput)) {
+                    throw new IOException("Output path is a directory: ${absoluteOutput}")
                 }
+                Files.move(staging, absoluteOutput, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             } finally {
                 Files.deleteIfExists(staging)
             }
@@ -208,6 +208,7 @@ class MauroPluginCSVCommand implements Runnable {
             if (summary) printRunSummary(runSummary)
         } catch (Exception exception) {
             runSummary.error = exception.message ?: exception.class.simpleName
+            log.error("Catalogue run failed: ${runSummary.error}", exception)
             System.err.println("Catalogue run failed: ${runSummary.error}")
             if (summary) printRunSummary(runSummary)
             if (commandLineInvocation) System.exit(1)

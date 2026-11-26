@@ -104,7 +104,7 @@ class MauroPluginDatabricksCommandSpec extends Specification {
         File source = new File(getClass().getResource('/csv-catalogues/sqlserver/metadata_simple').toURI())
         def root = Files.createTempDirectory('csv-cli-temp-option')
         def tempDirectory = root.resolve('chosen-temp')
-        def output = root.resolve('catalogue.json')
+        def output = root.resolve('new-output').resolve('catalogue.json')
         def logFile = root.resolve('catalogue.log')
 
         when:
@@ -119,6 +119,7 @@ class MauroPluginDatabricksCommandSpec extends Specification {
 
         then:
         Files.exists(output)
+        Files.isDirectory(output.parent)
         Files.readString(logFile).contains(tempDirectory.toString())
         Files.isDirectory(tempDirectory)
         Files.list(tempDirectory).toList().isEmpty()
@@ -129,13 +130,15 @@ class MauroPluginDatabricksCommandSpec extends Specification {
         def root = Files.createTempDirectory('csv-cli-failure')
         def source = root.resolve('broken.csv')
         def output = root.resolve('catalogue.json')
-        Files.writeString(source, 'one,two\n1,2\n')
+        def logFile = root.resolve('catalogue.log')
+        Files.write(source, [(byte) 0xff, (byte) 0xfe, 0, 0, (byte) 0x81, (byte) 0x81] as byte[])
         def command = new MauroPluginCSVCommand(
             csvDataModelImporter: ctx.getBean(CSVDataModelImporter),
             backwardsCompatibleJsonDataModelExporterPlugin: ctx.getBean(BackwardsCompatibleJsonDataModelExporterPlugin),
             jsonFolderExporterPlugin: ctx.getBean(org.maurodata.plugin.exporter.json.JsonFolderExporterPlugin),
             sourceFile: source.toString(), output: output,
-            firstRowIsHeader: false, headers: 'single')
+            firstRowIsHeader: true, logFile: logFile, quiet: true,
+            outputStructure: 'DATA_MODEL')
 
         when:
         command.run()
@@ -143,6 +146,32 @@ class MauroPluginDatabricksCommandSpec extends Specification {
         then:
         thrown(Exception)
         !Files.exists(output)
+        Files.readString(logFile).contains('Catalogue run failed: Failed to create table')
+    }
+
+    void "directory output target is rejected without replacing it"() {
+        given:
+        def root = Files.createTempDirectory('csv-cli-directory-output')
+        def source = root.resolve('readable.csv')
+        Files.writeString(source, 'id,value\n1,ok\n')
+        def outputDirectory = Files.createDirectory(root.resolve('catalogue.json'))
+        def tempDirectory = root.resolve('temp')
+        def command = new MauroPluginCSVCommand(
+            csvDataModelImporter: ctx.getBean(CSVDataModelImporter),
+            backwardsCompatibleJsonDataModelExporterPlugin: ctx.getBean(BackwardsCompatibleJsonDataModelExporterPlugin),
+            jsonFolderExporterPlugin: ctx.getBean(org.maurodata.plugin.exporter.json.JsonFolderExporterPlugin),
+            sourceFile: source.toString(), output: outputDirectory, tempDirectory: tempDirectory,
+            firstRowIsHeader: true, outputStructure: 'DATA_MODEL')
+
+        when:
+        command.run()
+
+        then:
+        thrown(java.io.IOException)
+        Files.isDirectory(outputDirectory)
+        Files.list(outputDirectory).toList().isEmpty()
+        Files.isDirectory(tempDirectory)
+        Files.list(tempDirectory).toList().isEmpty()
     }
 
     void "CLI imports the checked-in SQL Server fixture with include and metadata options"() {
