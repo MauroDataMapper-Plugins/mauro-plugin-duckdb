@@ -190,8 +190,8 @@ class MauroPluginCSVCommand implements Runnable {
             }
 
             Path absoluteOutput = output.toAbsolutePath().normalize()
-            Files.createDirectories(absoluteOutput.parent)
             Path stagingRoot = tempDirectory?.toAbsolutePath()?.normalize() ?: absoluteOutput.parent
+            Files.createDirectories(absoluteOutput.parent)
             Files.createDirectories(stagingRoot)
             Path staging = Files.createTempFile(stagingRoot, absoluteOutput.fileName.toString(), '.tmp')
             try {
